@@ -32,6 +32,7 @@ jobs:
             celery redis \
             slowapi limits \
             python-multipart aiofiles \
+            numpy \
             sentry-sdk structlog \
             pytest pytest-asyncio httpx
 
