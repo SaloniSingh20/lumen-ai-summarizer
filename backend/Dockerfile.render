@@ -18,21 +18,17 @@ ENV PYTHONPATH=/app
 
 RUN pip install --upgrade pip
 
-# CPU-only PyTorch (~400 MB vs ~2 GB GPU wheel)
-RUN pip install --no-cache-dir \
-    torch==2.3.1+cpu \
-    --index-url https://download.pytorch.org/whl/cpu
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn==21.2.0 PyJWT==2.9.0 groq
+# Slim requirements — no PyTorch, uses Groq Whisper API + fastembed (ONNX)
+COPY requirements.render.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn==21.2.0
 
 COPY . .
 
-# Render persistent disk mounts here; create dirs for local fallback too
+# Render persistent disk mounts here; symlink so app paths still work
 RUN mkdir -p /mnt/lumen-data/uploads /mnt/lumen-data/keyframes /mnt/lumen-data/data \
-    && ln -s /mnt/lumen-data/uploads  /app/uploads \
+    && ln -s /mnt/lumen-data/uploads   /app/uploads \
     && ln -s /mnt/lumen-data/keyframes /app/keyframes \
-    && ln -s /mnt/lumen-data/data     /app/data
+    && ln -s /mnt/lumen-data/data      /app/data
 
 COPY supervisord.conf /etc/supervisor/conf.d/lumen.conf
 

@@ -40,20 +40,30 @@ class GroqProvider(AIProvider):
         from groq import Groq
         self._client = Groq(api_key=settings.GROQ_API_KEY)
 
-    # ── Transcription: always local faster-whisper ──────────────────────────
+    # ── Transcription: Groq Whisper API (no local PyTorch model needed) ─────
     def transcribe(self, audio_path: str) -> tuple[List[TranscriptSegment], str]:
-        from faster_whisper import WhisperModel
-        model = WhisperModel(
-            settings.WHISPER_MODEL_SIZE,
-            device=settings.WHISPER_DEVICE,
-            compute_type=settings.WHISPER_COMPUTE_TYPE,
+        import os
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+        result = self._client.audio.transcriptions.create(
+            file=(os.path.basename(audio_path), audio_bytes),
+            model="whisper-large-v3-turbo",
+            response_format="verbose_json",
+            timestamp_granularities=["segment"],
         )
-        segments_raw, info = model.transcribe(audio_path, language=None, beam_size=5)
+        language = getattr(result, "language", None) or "en"
+        raw_segments = getattr(result, "segments", None) or []
         segments = [
-            TranscriptSegment(start=s.start, end=s.end, text=s.text.strip(), language=info.language)
-            for s in segments_raw if s.text.strip()
+            TranscriptSegment(
+                start=float(getattr(seg, "start", 0)),
+                end=float(getattr(seg, "end", 0)),
+                text=getattr(seg, "text", "").strip(),
+                language=language,
+            )
+            for seg in raw_segments
+            if getattr(seg, "text", "").strip()
         ]
-        return segments, info.language
+        return segments, language
 
     # ── VLM: llama-3.2-vision via Groq ─────────────────────────────────────
     def describe_frame(self, image_path: str) -> str:
