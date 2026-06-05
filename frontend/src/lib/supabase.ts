@@ -11,8 +11,10 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const env = (import.meta as any).env ?? {}
-const url  = env.VITE_SUPABASE_URL  as string | undefined
-const key  = env.VITE_SUPABASE_ANON_KEY as string | undefined
+// Strip BOM (U+FEFF) that PowerShell can inject when setting Vercel env vars via pipe
+const stripBom = (s: string | undefined) => s && s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s
+const url  = stripBom(env.VITE_SUPABASE_URL  as string | undefined)
+const key  = stripBom(env.VITE_SUPABASE_ANON_KEY as string | undefined)
 
 export const supabase: SupabaseClient | null =
   url && key ? createClient(url, key) : null
