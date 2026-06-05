@@ -82,7 +82,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check docker-compose config
-        run: docker compose config --quiet
+        run: |
+          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            docker compose config --quiet
+          elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose config --quiet
+          else
+            echo "docker compose not available — skipping compose config check"
+          fi
 
       - name: Lint backend Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
