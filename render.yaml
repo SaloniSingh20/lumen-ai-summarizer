@@ -1,0 +1,68 @@
+services:
+  - type: web
+    name: lumen-ai-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile.render
+    dockerContext: ./backend
+    plan: standard          # 2 GB RAM — required for Whisper + sentence-transformers
+    healthCheckPath: /health
+    disk:
+      name: lumen-data
+      mountPath: /mnt/lumen-data
+      sizeGB: 10
+    envVars:
+      # ── AI provider ───────────────────────────────────────────────────────
+      - key: AI_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false          # set manually in Render dashboard
+
+      # ── Supabase ──────────────────────────────────────────────────────────
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false          # postgresql://... from Supabase
+
+      # ── Redis (Upstash) ───────────────────────────────────────────────────
+      - key: REDIS_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+
+      # ── Storage paths (mapped to the persistent disk) ─────────────────────
+      - key: UPLOAD_DIR
+        value: /mnt/lumen-data/uploads
+      - key: KEYFRAMES_DIR
+        value: /mnt/lumen-data/keyframes
+      - key: DB_URL
+        value: sqlite:////mnt/lumen-data/data/app.db
+
+      # ── Security ──────────────────────────────────────────────────────────
+      - key: ADMIN_SECRET
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+
+      # ── Whisper ───────────────────────────────────────────────────────────
+      - key: WHISPER_MODEL_SIZE
+        value: base
+      - key: WHISPER_DEVICE
+        value: cpu
+      - key: WHISPER_COMPUTE_TYPE
+        value: int8
+
+      # ── Concurrency (tuned for 2 GB plan) ────────────────────────────────
+      - key: WEB_WORKERS
+        value: "1"
+      - key: WORKER_CONCURRENCY
+        value: "1"
+
+      # ── Logging ───────────────────────────────────────────────────────────
+      - key: LOG_FORMAT
+        value: json
