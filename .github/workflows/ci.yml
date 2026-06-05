@@ -34,7 +34,10 @@ jobs:
             python-multipart aiofiles \
             numpy \
             sentry-sdk structlog \
-            pytest pytest-asyncio httpx
+            pytest pytest-asyncio httpx \
+            reportlab Pillow \
+            PyJWT \
+            opencv-python-headless
 
       - name: Run tests
         working-directory: backend
