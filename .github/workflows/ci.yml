@@ -84,10 +84,15 @@ jobs:
 
       - name: Check docker-compose config
         run: |
+          # Some runners don't provide a .env file used by docker-compose; use an empty env file at runtime
           if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-            docker compose config --quiet
+            docker compose config --quiet --env-file /dev/null || exit 1
           elif command -v docker-compose >/dev/null 2>&1; then
-            docker-compose config --quiet
+            # Create an empty .env in the workspace so docker-compose config doesn't fail
+            if [ ! -f .env ]; then
+              touch .env
+            fi
+            docker-compose config --quiet || exit 1
           else
             echo "docker compose not available — skipping compose config check"
           fi
