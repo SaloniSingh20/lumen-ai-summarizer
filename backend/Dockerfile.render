@@ -18,19 +18,16 @@ ENV PYTHONPATH=/app
 
 RUN pip install --upgrade pip
 
-# Slim requirements — no PyTorch, uses Groq Whisper API + fastembed (ONNX)
-COPY requirements.render.txt ./requirements.txt
+# Copy slim requirements first (build context = repo root)
+COPY backend/requirements.render.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt gunicorn==21.2.0
 
-COPY . .
+# Copy backend source
+COPY backend/ .
 
-# Render persistent disk mounts here; symlink so app paths still work
-RUN mkdir -p /mnt/lumen-data/uploads /mnt/lumen-data/keyframes /mnt/lumen-data/data \
-    && ln -s /mnt/lumen-data/uploads   /app/uploads \
-    && ln -s /mnt/lumen-data/keyframes /app/keyframes \
-    && ln -s /mnt/lumen-data/data      /app/data
+RUN mkdir -p /tmp/uploads /tmp/keyframes
 
-COPY supervisord.conf /etc/supervisor/conf.d/lumen.conf
+COPY backend/supervisord.conf /etc/supervisor/conf.d/lumen.conf
 
 EXPOSE 8000
 
