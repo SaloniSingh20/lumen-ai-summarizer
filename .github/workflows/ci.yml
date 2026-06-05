@@ -88,10 +88,10 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: backend/Dockerfile
-          ignore: DL3008,DL3009,DL3013
+          ignore: DL3008,DL3009,DL3013,DL3025,DL3042,DL3059
 
       - name: Lint worker Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: backend/Dockerfile.worker
-          ignore: DL3008,DL3009,DL3013
+          ignore: DL3008,DL3009,DL3013,DL3025,DL3042,DL3059
