@@ -1,0 +1,125 @@
+"""Stage 1: Ingest — accept file path or download from URL using yt-dlp."""
+import os
+import subprocess
+import json
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# YouTube videos that consistently fail: age-restricted, DRM-protected music
+# videos, private videos, or geo-blocked content. We try multiple strategies.
+_COOKIES_FILE = "/cookies/youtube_cookies.txt"
+
+_YT_STRATEGIES = [
+    # Android client is most reliable in 2026 — no PO token required, no nsig issues
+    ["--extractor-args", "youtube:player_client=android"],
+    # Fallback: android + web combined
+    ["--extractor-args", "youtube:player_client=android,web"],
+    # Last resort: default
+    [],
+]
+
+
+def probe_video(file_path: str) -> dict:
+    """Use ffprobe to get duration and stream info."""
+    cmd = [
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_format", "-show_streams", file_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {result.stderr}")
+    data = json.loads(result.stdout)
+    duration  = float(data.get("format", {}).get("duration", 0))
+    has_video = any(s["codec_type"] == "video" for s in data.get("streams", []))
+    has_audio = any(s["codec_type"] == "audio" for s in data.get("streams", []))
+    return {"duration": duration, "has_video": has_video, "has_audio_stream": has_audio}
+
+
+def download_url(url: str, output_dir: str) -> str:
+    """
+    Download a video from URL using yt-dlp.
+
+    Tries multiple client strategies so restricted videos have a better
+    chance of working.  Raises RuntimeError with a human-readable message
+    on failure (shown directly in the UI error banner).
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
+
+    # Use browser cookies if available — fixes 403 on most YouTube videos.
+    # Copy to /tmp first because yt-dlp may try to write back updated cookies,
+    # which would fail on a read-only volume mount.
+    cookie_args: list[str] = []
+    if os.path.exists(_COOKIES_FILE) and os.path.getsize(_COOKIES_FILE) > 50:
+        import shutil
+        tmp_cookies = "/tmp/yt_cookies_tmp.txt"
+        shutil.copy2(_COOKIES_FILE, tmp_cookies)
+        cookie_args = ["--cookies", tmp_cookies]
+
+    base_cmd = [
+        "yt-dlp",
+        "--no-playlist",
+        "--format", "best[height<=720][ext=mp4]/best[height<=720]/best",
+        "-o", output_template,
+        "--no-warnings",
+        "--socket-timeout", "30",
+    ] + cookie_args
+
+    last_error = ""
+    for extra_args in _YT_STRATEGIES:
+        cmd = base_cmd + extra_args + [url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            files = [f for f in Path(output_dir).iterdir() if f.is_file()]
+            if files:
+                return str(max(files, key=lambda f: f.stat().st_mtime))
+        last_error = (result.stderr or result.stdout)[-400:]
+
+    # Parse the last error into a helpful message
+    raise RuntimeError(_friendly_error(url, last_error))
+
+
+def _friendly_error(url: str, raw_error: str) -> str:
+    """Convert a raw yt-dlp error into a user-friendly message."""
+    e = raw_error.lower()
+
+    if "403" in e or "forbidden" in e:
+        return (
+            "YouTube blocked this video (HTTP 403). "
+            "This usually means the video is age-restricted, a DRM-protected music video, "
+            "or geo-blocked in the server's region. "
+            "Try a different video — lectures, tutorials, or podcasts work best."
+        )
+    if "private" in e:
+        return "This video is private and cannot be downloaded."
+    if "not available" in e or "unavailable" in e:
+        return "This video is unavailable in the server's region."
+    if "sign in" in e or "login" in e:
+        return "This video requires a YouTube account to view. Try a publicly accessible video."
+    if "copyright" in e or "drm" in e:
+        return "This video is DRM-protected and cannot be downloaded."
+    if "live" in e:
+        return "Live streams cannot be summarized. Try a recorded video."
+    if "no video" in e or "no formats" in e:
+        return "No downloadable formats found for this URL."
+
+    return (
+        f"Could not download the video. "
+        f"YouTube error: {raw_error[-200:].strip() or 'unknown'}. "
+        "Try a different URL — YouTube tutorials, lectures, or talks work best."
+    )
+
+
+def get_filename_from_url(url: str) -> str:
+    """Extract a clean display filename from a URL."""
+    import re
+    yt_match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
+    if yt_match:
+        return f"youtube_{yt_match.group(1)}.mp4"
+    path = url.split("?")[0].rstrip("/")
+    name = path.split("/")[-1] or "video.mp4"
+    if "." not in name:
+        name += ".mp4"
+    return name

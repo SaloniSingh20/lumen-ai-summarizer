@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ENV PYTHONPATH=/app
+
+RUN pip install --upgrade pip
+
+RUN pip install --no-cache-dir \
+    torch==2.3.1+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt PyJWT==2.9.0 groq
+
+COPY . .
+
+RUN mkdir -p uploads keyframes data
+
+CMD celery -A worker.tasks.celery_app worker \
+      --loglevel=info \
+      -c ${WORKER_CONCURRENCY:-2} \
+      --max-tasks-per-child=10 \
+      --without-gossip \
+      --without-mingle

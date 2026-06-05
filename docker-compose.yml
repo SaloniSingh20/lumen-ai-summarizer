@@ -1,0 +1,86 @@
+# DATABASE: set DATABASE_URL in .env to your Supabase PostgreSQL URI.
+# If DATABASE_URL is empty the app falls back to SQLite (local dev only).
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UPLOAD_DIR=/app/uploads
+      - KEYFRAMES_DIR=/app/keyframes
+      - DB_URL=sqlite:///./data/app.db
+      # Gunicorn worker count — tune to (2 × vCPUs) + 1
+      - WEB_WORKERS=2
+    volumes:
+      - app_uploads:/app/uploads
+      - app_keyframes:/app/keyframes
+      - app_data:/app/data
+      - ./youtube_cookies.txt:/cookies/youtube_cookies.txt:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - UPLOAD_DIR=/app/uploads
+      - KEYFRAMES_DIR=/app/keyframes
+      - DB_URL=sqlite:///./data/app.db
+      # Celery job concurrency per worker container
+      - WORKER_CONCURRENCY=2
+    volumes:
+      - app_uploads:/app/uploads
+      - app_keyframes:/app/keyframes
+      - app_data:/app/data
+      # Mount YouTube cookies file if it exists (fixes 403 errors)
+      - ./youtube_cookies.txt:/cookies/youtube_cookies.txt:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  app_uploads:
+  app_keyframes:
+  app_data:
