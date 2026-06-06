@@ -107,7 +107,7 @@ def lumen_chat(
             seen.add(key)
             label = seg.get("label") or ("Transcript" if seg.get("type") == "transcript" else "Visual")
             sources.append(SourceChip(
-                label=f"{label} ({format_time(start)}â€“{format_time(end)})",
+                label=f”{label} ({format_time(start)}–{format_time(end)})”,
                 start=start,
                 end=end,
             ))

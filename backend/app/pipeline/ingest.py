@@ -135,22 +135,32 @@ def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
         raise RuntimeError("youtube-transcript-api not installed")
 
     try:
-        # Try preferred languages first, then fall back to any available
-        for lang_pref in [["en", "en-US", "en-GB"], None]:
-            try:
-                if lang_pref:
-                    raw = YouTubeTranscriptApi.get_transcript(video_id, languages=lang_pref)
-                    lang = "en"
-                else:
-                    transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-                    first = next(iter(transcripts))
-                    raw = first.fetch()
-                    lang = first.language_code
-                break
-            except Exception:
-                if lang_pref is None:
-                    raise
-                continue
+        # Try preferred languages first, then auto-generated, then any available
+        raw = None
+        lang = "en"
+        try:
+            raw = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
+        except Exception:
+            pass
+
+        if raw is None:
+            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript = None
+            # Prefer auto-generated (widely available) over manually created
+            for finder in (
+                lambda t: t.find_generated_transcript(["en", "en-US", "en-GB"]),
+                lambda t: t.find_manually_created_transcript(["en", "en-US", "en-GB"]),
+                lambda t: next(iter(t)),
+            ):
+                try:
+                    transcript = finder(transcripts)
+                    break
+                except Exception:
+                    continue
+            if transcript is None:
+                raise RuntimeError("No transcripts found")
+            raw = transcript.fetch()
+            lang = transcript.language_code
 
         segments = []
         for item in raw:
