@@ -161,7 +161,10 @@ def _create_job_and_enqueue(
     db.add(video)
     db.commit()
 
-    process_video_task.delay(job.id, video_id)
+    try:
+        process_video_task.delay(job.id, video_id)
+    except Exception as _dispatch_err:
+        logger.warning("Task dispatch failed (broker unavailable?): %s", _dispatch_err)
 
     return UploadResponse(job_id=job.id, video_id=video_id, message="Job queued successfully")
 
@@ -224,6 +227,9 @@ def _submit_youtube_transcript_only(
 
     db.commit()
 
-    process_transcript_only_task.delay(job.id, video_id)
+    try:
+        process_transcript_only_task.delay(job.id, video_id)
+    except Exception as _dispatch_err:
+        logger.warning("Transcript task dispatch failed: %s", _dispatch_err)
 
     return UploadResponse(job_id=job.id, video_id=video_id, message="Transcript fetched — generating notes")

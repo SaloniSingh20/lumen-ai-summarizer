@@ -13,7 +13,7 @@ os.environ["RATELIMIT_READ"] = "10/minute"
 os.environ["MAX_AI_CALLS_PER_DAY"] = "3"
 os.environ["ADMIN_SECRET"] = "test-admin-secret"
 os.environ["SECRET_KEY"] = "test-secret-key-32-chars-xxxxxxxx"
-os.environ["AI_PROVIDER"] = "api"
+os.environ["AI_PROVIDER"] = "mock"
 
 import uuid
 import pytest

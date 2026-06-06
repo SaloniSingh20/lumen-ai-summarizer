@@ -7,7 +7,10 @@ from ..config import get_settings
 def get_provider() -> AIProvider:
     settings = get_settings()
     mode = settings.AI_PROVIDER.lower()
-    if mode == "groq":
+    if mode in ("mock", "test", "none"):
+        from .mock_provider import MockProvider
+        return MockProvider()
+    elif mode == "groq":
         from .groq_provider import GroqProvider
         return GroqProvider()
     elif mode == "local":
@@ -19,5 +22,5 @@ def get_provider() -> AIProvider:
     else:
         raise ValueError(
             f"Unknown AI_PROVIDER: {mode!r}. "
-            "Valid options: 'groq' (free), 'local' (Ollama), 'api' (Gemini)."
+            "Valid options: 'groq' (free), 'local' (Ollama), 'api' (Gemini), 'mock' (CI/testing)."
         )

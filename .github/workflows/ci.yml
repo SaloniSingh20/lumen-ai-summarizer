@@ -25,29 +25,40 @@ jobs:
         working-directory: backend
         run: |
           pip install --upgrade pip
-          # Install only the packages needed to run tests (no GPU/heavy deps)
+          # Pin versions to match production and avoid version-drift failures.
+          # Heavy AI deps (google-generativeai, groq, fastembed, faiss) are
+          # intentionally excluded — the mock provider is used in CI instead.
           pip install \
-            fastapi uvicorn pydantic pydantic-settings \
-            sqlalchemy \
-            celery redis \
-            slowapi limits \
-            python-multipart aiofiles \
-            numpy \
-            sentry-sdk structlog \
-            pytest pytest-asyncio httpx \
-            reportlab Pillow \
-            PyJWT \
-            opencv-python-headless \
-            youtube-transcript-api
+            "fastapi==0.111.0" \
+            "uvicorn==0.30.1" \
+            "pydantic==2.7.1" \
+            "pydantic-settings==2.3.1" \
+            "sqlalchemy==2.0.30" \
+            "celery==5.4.0" \
+            "redis==5.0.4" \
+            "slowapi==0.1.9" \
+            "limits==3.13.0" \
+            "python-multipart==0.0.9" \
+            "aiofiles==23.2.1" \
+            "numpy==1.26.4" \
+            "sentry-sdk==2.6.0" \
+            "structlog==24.2.0" \
+            "pytest==8.2.2" \
+            "pytest-asyncio==0.23.7" \
+            "httpx==0.27.0" \
+            "reportlab==4.2.2" \
+            "Pillow==10.4.0" \
+            "PyJWT==2.8.0" \
+            "opencv-python-headless==4.10.0.84" \
+            "youtube-transcript-api==0.6.2"
 
       - name: Run tests
         working-directory: backend
         env:
           TESTING: "1"
-          AI_PROVIDER: "api"
+          AI_PROVIDER: "mock"
           ADMIN_SECRET: "ci-test-secret"
           SECRET_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
-          GOOGLE_API_KEY: "fake-key-for-ci"
           ENABLE_FAISS: "False"
         run: python -m pytest tests/ -v --tb=short
 

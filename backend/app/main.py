@@ -8,7 +8,6 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -138,8 +137,12 @@ app.add_middleware(SlowAPIMiddleware)
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    reset_time = getattr(exc.limit, "reset_time", None)
-    retry = str(int(reset_time)) if reset_time else "60"
+    try:
+        limit_obj = getattr(exc, "limit", None)
+        reset_time = getattr(limit_obj, "reset_time", None) if limit_obj is not None else None
+        retry = str(int(reset_time)) if reset_time else "60"
+    except Exception:
+        retry = "60"
     return JSONResponse(
         status_code=429,
         content={"detail": "Rate limit exceeded", "retry_after": retry},
