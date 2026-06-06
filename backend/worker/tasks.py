@@ -6,8 +6,9 @@ logger = logging.getLogger(__name__)
 
 # Read config before creating the app so env vars are loaded
 import os
-_broker = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-_backend = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+_redis_default = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+_broker  = os.environ.get("CELERY_BROKER_URL")  or _redis_default
+_backend = os.environ.get("CELERY_RESULT_BACKEND") or _redis_default
 
 celery_app = Celery(
     "video_summarizer",
