@@ -37,7 +37,8 @@ jobs:
             pytest pytest-asyncio httpx \
             reportlab Pillow \
             PyJWT \
-            opencv-python-headless
+            opencv-python-headless \
+            youtube-transcript-api
 
       - name: Run tests
         working-directory: backend
@@ -47,6 +48,7 @@ jobs:
           ADMIN_SECRET: "ci-test-secret"
           SECRET_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
           GOOGLE_API_KEY: "fake-key-for-ci"
+          ENABLE_FAISS: "False"
         run: python -m pytest tests/ -v --tb=short
 
   # ── Frontend build ───────────────────────────────────────────────────────

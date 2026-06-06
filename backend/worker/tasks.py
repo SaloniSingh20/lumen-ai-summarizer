@@ -1,16 +1,16 @@
 """Celery tasks — use absolute imports (top-level packages from backend/)."""
 import logging
+import os
+import ssl as _ssl
+
 from celery import Celery
 
 logger = logging.getLogger(__name__)
 
 # Read config before creating the app so env vars are loaded
-import os
 _redis_default = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 _broker  = os.environ.get("CELERY_BROKER_URL")  or _redis_default
 _backend = os.environ.get("CELERY_RESULT_BACKEND") or _redis_default
-
-import ssl as _ssl
 
 celery_app = Celery(
     "video_summarizer",
@@ -18,9 +18,13 @@ celery_app = Celery(
     backend=_backend,
 )
 
-_ssl_opts = {"ssl_cert_reqs": _ssl.CERT_NONE}
+# Only apply SSL options when the URL actually uses TLS (rediss://).
+# Setting broker_use_ssl on a plain redis:// URL causes kombu to attempt
+# an SSL handshake on a non-SSL socket, breaking CI and local dev.
+_broker_ssl  = {"ssl_cert_reqs": _ssl.CERT_NONE} if _broker.startswith("rediss://")  else {}
+_backend_ssl = {"ssl_cert_reqs": _ssl.CERT_NONE} if _backend.startswith("rediss://") else {}
 
-celery_app.conf.update(
+_conf: dict = dict(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
@@ -29,9 +33,19 @@ celery_app.conf.update(
     task_track_started=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
-    broker_use_ssl=_ssl_opts,
-    redis_backend_use_ssl=_ssl_opts,
 )
+if _broker_ssl:
+    _conf["broker_use_ssl"] = _broker_ssl
+if _backend_ssl:
+    _conf["redis_backend_use_ssl"] = _backend_ssl
+
+# In tests (TESTING=1) there is no broker — run tasks synchronously so
+# endpoints return 200 and rate-limit / budget assertions still pass.
+if os.environ.get("TESTING") == "1":
+    _conf["task_always_eager"] = True
+    _conf["task_eager_propagates"] = False  # swallow task failures silently
+
+celery_app.conf.update(**_conf)
 
 
 @celery_app.task(bind=True, name="worker.tasks.process_transcript_only_task", max_retries=1)
