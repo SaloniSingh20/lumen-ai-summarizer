@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from functools import lru_cache
 import secrets
 
@@ -54,9 +55,17 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     FAISS_TOP_K: int = 5
 
-    # Celery
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    # Celery — defaults to REDIS_URL if not explicitly set
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    @model_validator(mode="after")
+    def _set_celery_defaults(self):
+        if not self.CELERY_BROKER_URL:
+            self.CELERY_BROKER_URL = self.REDIS_URL
+        if not self.CELERY_RESULT_BACKEND:
+            self.CELERY_RESULT_BACKEND = self.REDIS_URL
+        return self
 
     # Database — set DATABASE_URL to a PostgreSQL URI to use Supabase.
     # Falls back to DB_URL (SQLite) when DATABASE_URL is empty.
