@@ -79,6 +79,16 @@ def lumen_chat(
         )
         if context_segments:
             seek_to = context_segments[0].get("start")
+    else:
+        # FAISS unavailable — fall back to keyword search over transcript for context
+        all_segments = db.query(TranscriptSegment).filter(TranscriptSegment.video_id == video.id).all()
+        msg_lower = message.lower()
+        for seg in all_segments:
+            if any(word in seg.text.lower() for word in msg_lower.split() if len(word) > 3):
+                context_segments.append({"type": "transcript", "start": seg.start, "end": seg.end, "text": seg.text})
+                if seek_to is None:
+                    seek_to = seg.start
+        context_segments = context_segments[:settings.FAISS_TOP_K]
 
     answer = provider.answer_question(
         question=message,

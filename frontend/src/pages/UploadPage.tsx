@@ -118,10 +118,12 @@ export default function UploadPage() {
         let friendly = msg
         if (msg === 'Failed to fetch')
           friendly = 'Server is still starting up. Please wait 30 seconds then try again.'
+        else if (msg.toLowerCase().includes('blocked') && msg.toLowerCase().includes('caption'))
+          friendly = 'YouTube blocked the download and this video has no captions. Switch to "Upload File" and upload the video from your device instead.'
         else if (msg.toLowerCase().includes('account') || msg.toLowerCase().includes('login') || msg.toLowerCase().includes('sign in') || msg.toLowerCase().includes('age'))
-          friendly = 'This video requires sign-in or is age-restricted. Use a fully public video — paste just the youtube.com/watch?v=... URL without extra parameters.'
+          friendly = 'This video requires sign-in or is age-restricted. Try a fully public video, or switch to "Upload File" to upload directly.'
         else if (msg.toLowerCase().includes('private'))
-          friendly = 'This video is private. Use a public YouTube video.'
+          friendly = 'This video is private. Use a public YouTube video, or upload the file directly.'
         setError(friendly)
         setLoading(false)
         return
@@ -280,15 +282,25 @@ export default function UploadPage() {
           )}
 
           {error && (
-            <motion.p
+            <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               role="alert"
-              className="mt-4 flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3"
+              className="mt-4 flex flex-col gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3"
             >
-              <AlertCircle className="w-4 h-4 shrink-0" aria-hidden />
-              {error}
-            </motion.p>
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
+                <span>{error}</span>
+              </div>
+              {(error.toLowerCase().includes('upload file') || error.toLowerCase().includes('upload the video')) && mode === 'url' && (
+                <button
+                  onClick={() => { setMode('file'); setError('') }}
+                  className="self-start ml-6 text-xs font-medium text-red-800 underline underline-offset-2 hover:text-red-900"
+                >
+                  Switch to Upload File →
+                </button>
+              )}
+            </motion.div>
           )}
         </motion.div>
 

@@ -152,15 +152,20 @@ def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
                     raise
                 continue
 
-        segments = [
-            {
-                "start": float(item.get("start", 0)),
-                "end": float(item.get("start", 0)) + float(item.get("duration", 1)),
-                "text": str(item.get("text", "")).strip(),
-            }
-            for item in raw
-            if str(item.get("text", "")).strip()
-        ]
+        segments = []
+        for item in raw:
+            # Support both dict (v0.x) and object (newer API) responses
+            if isinstance(item, dict):
+                start = float(item.get("start", 0))
+                dur   = float(item.get("duration", 1))
+                text  = str(item.get("text", "")).strip()
+            else:
+                start = float(getattr(item, "start", 0))
+                dur   = float(getattr(item, "duration", 1))
+                text  = str(getattr(item, "text", "")).strip()
+            if text:
+                segments.append({"start": start, "end": start + dur, "text": text})
+
         if not segments:
             raise RuntimeError("Transcript is empty")
         return segments, lang

@@ -81,27 +81,47 @@ def search_video(
         return SearchResponse(results=[SearchResult(**r) for r in cached_results])
 
     notes = db.query(Notes).filter(Notes.video_id == video.id).first()
-    if not notes or not notes.faiss_index_path:
-        raise HTTPException(404, "Search index not ready yet â€” processing may still be running.")
 
-    raw_results = search_index(
-        q,
-        notes.faiss_index_path,
-        notes.faiss_metadata_path,
-        get_provider(),
-        top_k=settings.FAISS_TOP_K,
-    )
-    results = [
-        SearchResult(
-            type=r["type"],
-            text=r["text"],
-            start=r["start"],
-            end=r["end"],
-            score=r["score"],
-            label=r.get("label"),
+    if notes and notes.faiss_index_path:
+        raw_results = search_index(
+            q,
+            notes.faiss_index_path,
+            notes.faiss_metadata_path,
+            get_provider(),
+            top_k=settings.FAISS_TOP_K,
         )
-        for r in raw_results
-    ]
+        results = [
+            SearchResult(
+                type=r[“type”],
+                text=r[“text”],
+                start=r[“start”],
+                end=r[“end”],
+                score=r[“score”],
+                label=r.get(“label”),
+            )
+            for r in raw_results
+        ]
+    else:
+        # FAISS unavailable (disabled or not built yet) — fall back to substring search
+        segments = db.query(TranscriptSegment).filter(TranscriptSegment.video_id == video.id).all()
+        scenes = db.query(Scene).filter(Scene.video_id == video.id).all()
+        q_lower = q.lower()
+        results = []
+        for seg in segments:
+            if q_lower in seg.text.lower():
+                results.append(SearchResult(
+                    type=”transcript”, text=seg.text,
+                    start=seg.start, end=seg.end, score=1.0,
+                ))
+        for sc in scenes:
+            if sc.description and q_lower in sc.description.lower():
+                results.append(SearchResult(
+                    type=”scene”, text=sc.description,
+                    start=sc.start_time, end=sc.end_time,
+                    score=0.8, label=sc.scene_label,
+                ))
+        results = results[:settings.FAISS_TOP_K]
+
     # Store in cache for subsequent identical queries
     cache.set_search(video.id, q, [r.dict() for r in results])
     return SearchResponse(results=results)
@@ -202,9 +222,12 @@ def get_media_token(
 ):
     """
     Issue a short-lived signed token (5 min) for video streaming.
+    Returns 404 for caption-only videos (no file was downloaded).
     The browser <video> element cannot send Authorization headers, so we
-    generate a single-use URL token here and use it in the stream endpoint.
+    generate a signed URL token here and use it in the stream endpoint.
     """
+    if not video.file_path:
+        raise HTTPException(404, "No video file — this video was processed from captions only")
     token = generate_media_token(video.id, video.owner_id, settings.SECRET_KEY)
     return {"token": token, "ttl": 300}
 

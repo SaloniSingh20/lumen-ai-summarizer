@@ -88,6 +88,13 @@ async def submit_url(
                 return _submit_youtube_transcript_only(db, video_id, url, current_user.id)
             except Exception as transcript_err:
                 logger.warning(f"Transcript fallback also failed for {url}: {transcript_err}")
+                # Both download and captions failed — give a clear, actionable error
+                raise HTTPException(
+                    400,
+                    "Could not process this video. YouTube blocked the download on our server "
+                    "and no captions are available for this video. "
+                    "Try the 'Upload File' tab to upload the video directly from your device."
+                )
         raise HTTPException(400, str(download_err))
 
     filename = get_filename_from_url(url)

@@ -235,8 +235,12 @@ def ready():
 
     # Redis
     try:
+        import ssl as _ssl
         import redis as redis_lib
-        r = redis_lib.from_url(settings.REDIS_URL, socket_connect_timeout=2)
+        _redis_kwargs: dict = {"socket_connect_timeout": 2}
+        if settings.REDIS_URL.startswith("rediss://"):
+            _redis_kwargs["ssl_cert_reqs"] = _ssl.CERT_NONE
+        r = redis_lib.from_url(settings.REDIS_URL, **_redis_kwargs)
         r.ping()
         checks["redis"] = "ok"
     except Exception as exc:
