@@ -32,8 +32,12 @@ def init_cache(redis_url: str) -> None:
     """Call once at app startup to connect the cache client."""
     global _client
     try:
+        import ssl as _ssl
         import redis as redis_lib
-        _client = redis_lib.from_url(redis_url, decode_responses=True)
+        kwargs: dict = {"decode_responses": True}
+        if redis_url.startswith("rediss://"):
+            kwargs["ssl_cert_reqs"] = _ssl.CERT_NONE
+        _client = redis_lib.from_url(redis_url, **kwargs)
         _client.ping()
         logger.info("Redis cache connected at %s", redis_url)
     except Exception as exc:

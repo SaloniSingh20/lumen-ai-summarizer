@@ -1,498 +1,455 @@
 # Lumen — AI Video Summarizer
 
-> *Watch less. Understand more.*
+An AI-powered video summarization platform that turns any video into structured notes, a searchable transcript, scene-by-scene visual breakdowns, and an interactive Q&A assistant — all in under two minutes.
 
-A production-quality, full-stack AI web application that transforms any video into structured notes, scene-by-scene visual analysis, semantic search, and a conversational Q&A assistant — all powered by multimodal AI.
-
----
-
-## Table of Contents
-
-1. [What it does](#what-it-does)
-2. [System Architecture](#system-architecture)
-3. [Processing Pipeline](#processing-pipeline)
-4. [Tech Stack](#tech-stack)
-5. [Quick Start (Docker)](#quick-start-docker)
-6. [Local Development](#local-development)
-7. [Authentication](#authentication)
-8. [Environment Variables](#environment-variables)
-9. [Security](#security)
-10. [Deployment](#deployment)
-11. [Running Tests](#running-tests)
-12. [API Reference](#api-reference)
-13. [Resume Bullet Points](#resume-bullet-points)
+**Live demo:** [lumen-ai-summarizer.vercel.app](https://lumen-ai-summarizer.vercel.app)
+**Repository:** [github.com/SaloniSingh20/lumen-ai-summarizer](https://github.com/SaloniSingh20/lumen-ai-summarizer)
 
 ---
 
-## What it does
+## Problem
 
-Upload any video (file upload or YouTube URL) and get:
+Watching a one-hour lecture to find a five-minute answer wastes time. Existing tools either produce walls of raw transcript text, miss visual context entirely, or require expensive API subscriptions. There is no lightweight, free-to-use tool that combines:
 
-| Feature | Description |
+- Timestamped transcript with semantic search
+- Visual scene analysis from video keyframes
+- Structured notes (TL;DR, key concepts, takeaways)
+- A context-aware chat assistant grounded in the video's actual content
+- PDF export for offline study
+
+Lumen fills that gap.
+
+---
+
+## Solution
+
+A multimodal video analysis pipeline that:
+
+| Capability | What it means |
 |---|---|
-| **Structured Notes** | Title, TL;DR, topics, key concepts, detailed markdown, takeaways |
-| **Scene Analysis** | Keyframe gallery with AI-generated visual descriptions per scene |
-| **Semantic Search** | FAISS vector search — ask anything, jump to the exact moment |
-| **Lumen Chat** | Conversational Q&A grounded in the video's content + time-range queries |
-| **Analytics** | Word frequency, WPM, speaking ratio, topic breakdown |
-| **PDF Export** | Beautifully formatted downloadable notes |
-| **My Videos** | Dashboard showing all your past summaries |
-| **Multi-language** | Auto-detects language via Whisper |
+| Dual input modes | Upload a video file **or** paste a YouTube URL |
+| YouTube transcript fallback | When server IP is blocked by YouTube's download restrictions, automatically fetches captions via the YouTube Captions API — no video download needed |
+| Audio transcription | Groq Whisper API — fast, accurate, no local model required |
+| Visual understanding | Scene detection + keyframe extraction + LLaMA 4 Vision description of each scene |
+| Structured AI notes | LLaMA 3.3 70B generates title, TL;DR, key concepts, detailed notes, and takeaways |
+| Semantic Q&A | Lumen chat assistant answers questions grounded in transcript and scene context |
+| PDF export | Beautifully formatted notes downloadable as a PDF |
+| Secure by design | Every endpoint is owner-scoped — no user can read another user's videos |
+
+This is not a transcript dump. It is a full content intelligence layer on top of any video.
 
 ---
 
-## System Architecture
+## Key Features
+
+### Video Processing
+- **File upload** — MP4, MOV, AVI, MKV, WebM, and more (up to 500 MB); validated by magic bytes, not just extension
+- **YouTube URL** — paste any public YouTube link; Lumen downloads and processes it
+- **Transcript-only fallback** — when yt-dlp is blocked by cloud server IP restrictions (common on all free hosting providers), automatically falls back to YouTube's captions API so the video is never silently rejected
+- **Scene detection** — PySceneDetect finds natural scene boundaries
+- **Keyframe extraction** — one representative JPEG per scene, served through an authenticated endpoint
+- **Audio detection** — gracefully handles silent / visual-only videos
+
+### AI Analysis
+- **Transcription** — Groq Whisper (whisper-large-v3-turbo), timestamped to the segment level
+- **Visual analysis** — LLaMA 4 Scout Vision (with automatic fallback to LLaMA 3.2 90B / 11B) describes each keyframe
+- **Notes generation** — LLaMA 3.3 70B produces structured output: content type, language, title, TL;DR, main topics, key concepts with explanations, detailed markdown notes, key takeaways, visual summary, per-scene labels
+- **Language detection** — auto-detects video language and surfaces it in the notes header
+
+### Lumen Chat
+- Ask anything about the video: "What did they say about X?", "What happened between 2:00 and 3:30?", "Summarize the intro"
+- Grounded answers with timestamped source chips — click any chip to jump to that moment in the video
+- Time-range queries parsed directly from natural language ("in the last 30 seconds", "from 1:00 to 2:00")
+- Conversation history maintained across the session
+
+### Dashboard and Results
+- All processed videos in one place, newest first
+- Thumbnail timeline with scene labels and descriptions
+- Full transcript with word-level timestamps
+- Analytics: word frequency chart, speaking ratio, words per minute, top topics
+- Full-text semantic search across the entire video
+- PDF export of all notes with styled headings, bullet lists, and scene table
+
+### Security
+- Supabase JWT authentication on every request
+- IDOR protection — ownership checked at both application layer (SQLAlchemy filter) and database layer (PostgreSQL RLS); a wrong-owner request returns 404, never 403
+- Short-lived signed media tokens for video streaming (5-minute TTL, HMAC-SHA256)
+- SSRF protection on URL ingest — blocks private IP ranges, loopback, and cloud metadata endpoints
+- File magic-byte validation — rejects non-video uploads regardless of file extension
+- Rate limiting on all endpoints via slowapi
+
+---
+
+## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│                        CLIENT (Browser)                             │
-│  React + Vite + TypeScript  ·  Tailwind CSS  ·  Framer Motion      │
-│  Supabase JS Client (auth)  ·  @supabase/supabase-js               │
-└──────────────────────────────┬─────────────────────────────────────┘
-                               │  HTTPS · JWT Bearer token
-┌──────────────────────────────▼─────────────────────────────────────┐
-│                       NGINX (port 3000)                             │
-│  Static file server  +  reverse proxy → API                        │
-└──────────────────────────────┬─────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼─────────────────────────────────────┐
-│                   FastAPI  (port 8000)                              │
-│  Gunicorn + UvicornWorker  ·  2 workers  ·  graceful shutdown       │
-│                                                                     │
-│  Auth:  validate Supabase JWT (HS256, auth.uid())                  │
-│         or legacy API token (UserToken table, local dev)            │
-│  Rate:  slowapi + Redis  (per-user token key)                      │
-│  IDOR:  get_owned_video / get_owned_job → always 404 on mismatch   │
-│  SSRF:  validate_ingest_url → block private IPs + metadata         │
-│  Magic: validate_upload_magic → file-type via header bytes         │
-│  Budget: Redis daily AI-call counter                               │
-└──────────┬─────────────────────────────────────────┬───────────────┘
-           │  SQLAlchemy ORM                          │  Celery task
-           │                                          │
-┌──────────▼──────────┐                  ┌────────────▼───────────────┐
-│  Supabase / SQLite  │                  │      Celery Worker          │
-│                     │                  │   (processes pipeline)      │
-│  Tables:            │                  │                             │
-│  · jobs             │                  │  faster-whisper (CPU)       │
-│  · videos           │                  │  PySceneDetect + OpenCV     │
-│  · transcript_segs  │                  │  Groq Vision (llama-4)      │
-│  · scenes           │                  │  Groq LLM (llama-3.3-70b)  │
-│  · notes            │                  │  FAISS index builder        │
-│  · user_tokens      │                  └────────────────────────────┘
-│                     │
-│  RLS via auth.uid() │                  ┌────────────────────────────┐
-│  (Supabase only)    │                  │           Redis             │
-└─────────────────────┘                  │  · Celery broker/results    │
-                                         │  · Rate limit counters      │
-                                         │  · AI budget counter        │
-                                         │  · Response cache           │
-                                         └────────────────────────────┘
+Browser (Vercel)
+    │
+    │  HTTPS + Supabase JWT
+    ▼
+FastAPI  ──────────────────►  Groq API
+(Render)                      (Whisper + LLaMA Vision + LLaMA 3.3 70B)
+    │
+    ├──► PostgreSQL (Neon.tech)    ◄── all persistent data
+    │
+    ├──► Redis (Upstash, TLS)      ◄── Celery broker + result backend
+    │                                   + response cache + daily budget guard
+    │
+    └──► Celery Worker (same container via supervisord)
+             │
+             └──► Pipeline stages:
+                  probe → audio → transcribe → scenes
+                  → keyframes → vision → notes → [FAISS optional]
+```
+
+| Layer | Stack |
+|---|---|
+| Frontend | React 19 + Vite + TypeScript + Tailwind CSS |
+| Backend API | FastAPI + Pydantic v2 + SQLAlchemy 2 |
+| Task queue | Celery 5 + Redis (Upstash, `rediss://` TLS) |
+| Database | PostgreSQL — Neon.tech free tier (IPv4 compatible) |
+| Auth | Supabase (JWT via REST, no server-side Supabase client needed) |
+| AI — transcription | Groq Whisper API (whisper-large-v3-turbo) |
+| AI — vision | Groq LLaMA 4 Scout Vision / LLaMA 3.2 Vision (fallback chain) |
+| AI — notes + chat | Groq LLaMA 3.3 70B Versatile |
+| Scene detection | PySceneDetect + OpenCV headless |
+| Video download | yt-dlp (tv_embedded → mweb → ios strategy chain) |
+| Transcript fallback | youtube-transcript-api (captions API, no download required) |
+| PDF generation | ReportLab |
+| Container | Docker + supervisord (gunicorn API + celery worker, one image) |
+| Frontend deploy | Vercel |
+| Backend deploy | Render free tier (512 MB RAM) |
+
+---
+
+## Data Model
+
+```
+UserToken (auth identity — Supabase user UUID)
+    │
+    ├── Job  (id, status: pending→processing→completed/failed, stage, progress, error)
+    │
+    └── Video (id, job_id, filename, original_url, file_path, duration, has_audio, language)
+            │
+            ├── TranscriptSegment[]   (id, start, end, text)
+            ├── Scene[]               (id, scene_number, start_time, end_time,
+            │                          keyframe_path, description, scene_label)
+            └── Notes                 (title, tldr, main_topics, key_concepts,
+                                       detailed_notes, key_takeaways, visual_summary,
+                                       scenes_summary, confidence_notes,
+                                       faiss_index_path, faiss_metadata_path)
 ```
 
 ---
 
 ## Processing Pipeline
 
-Each video goes through 10 ordered, resumable stages:
+**Full pipeline** (uploaded video file or successfully downloaded YouTube video):
 
 ```
-Upload / URL
-    │
-    ▼
-[1] Probe         ffprobe → duration, stream info
-    │
-    ▼
-[2] Extract Audio ffmpeg → 16 kHz mono WAV
-    │
-    ▼
-[3] Detect Audio  RMS energy check → has_audio flag
-    │                                (silent/music-only → visual-only mode)
-    ▼
-[4] Transcribe    faster-whisper (CPU/GPU) → segments + detected language
-    │
-    ▼
-[5] Scene Detect  PySceneDetect (ContentDetector) → scene list
-    │             Fallback: evenly-spaced scenes for short/uniform clips
-    ▼
-[6] Keyframes     OpenCV → 1 mid-scene JPG per scene (max 640 px wide)
-    │
-    ▼
-[7] Visual AI     Groq Vision (llama-4-scout or llama-3.2-90b) →
-    │             factual description of each keyframe
-    │             Anti-hallucination: describe only literally visible content
-    ▼
-[8] Generate Notes Groq LLM (llama-3.3-70b) →
-    │             JSON: title, TL;DR, topics, concepts, markdown notes,
-    │             takeaways, visual summary, scene labels, confidence notes
-    ▼
-[9] Build Index   sentence-transformers → float32 embeddings
-    │             FAISS IndexFlatIP → persisted to disk
-    ▼
-[10] Persist      All data written to DB · cache invalidated · job = completed
+1. Probe            ffprobe → duration, has_audio_stream, has_video_stream
+2. Extract audio    ffmpeg → mono WAV at 16 kHz for Whisper
+3. Detect audio     RMS energy check — gracefully handles silent videos
+4. Transcribe       Groq Whisper API → timestamped TranscriptSegment rows
+5. Scene detect     PySceneDetect → list of (start_time, end_time) boundaries
+6. Keyframes        ffmpeg → one JPEG per scene into /tmp/keyframes/{video_id}/
+7. Vision           Groq LLaMA Vision → text description per keyframe
+8. Notes            Groq LLaMA 3.3 70B → full structured JSON notes
+9. Search index     FAISS + fastembed (skipped when ENABLE_FAISS=False)
+10. Finalize        Job → completed, cache invalidated
 ```
 
-Each stage updates `jobs.progress` (0–100 %) — the frontend polls every 1.5 s and shows a live stage tracker.
+**Transcript-only pipeline** (YouTube URL when yt-dlp is blocked):
+
+```
+1. Captions         youtube-transcript-api → timestamped text segments
+2. Store            TranscriptSegment rows written to DB directly in the request handler
+3. Queue task       process_transcript_only_task enqueued to Celery
+4. Notes            Groq LLaMA 3.3 70B generates notes from transcript alone
+5. Finalize         Job → completed, cache invalidated
+```
 
 ---
 
-## Tech Stack
-
-### Backend
-| Layer | Technology |
-|---|---|
-| API framework | FastAPI 0.111 + Uvicorn + Gunicorn |
-| Task queue | Celery 5.4 + Redis 7 |
-| Database | SQLite (local) / Supabase PostgreSQL (production) |
-| ORM | SQLAlchemy 2.0 |
-| Auth | Supabase JWT (HS256) + legacy API tokens |
-| Transcription | faster-whisper (CPU, `base` model default) |
-| Scene detection | PySceneDetect 0.6 |
-| Keyframe extraction | OpenCV 4 |
-| AI provider | Groq (llama-4-scout for vision, llama-3.3-70b for LLM) |
-| Embeddings | sentence-transformers `all-MiniLM-L6-v2` |
-| Vector search | FAISS (IndexFlatIP, cosine after L2 norm) |
-| PDF export | ReportLab |
-| Rate limiting | slowapi + Redis |
-| Error tracking | Sentry SDK |
-| Logging | structlog (JSON in prod, pretty in dev) |
-
-### Frontend
-| Layer | Technology |
-|---|---|
-| Framework | React 18 + Vite 5 + TypeScript |
-| Styling | TailwindCSS 3 (custom rose design system) |
-| Auth UI | Supabase JS client (`@supabase/supabase-js`) |
-| Animation | Framer Motion |
-| Charts | Recharts |
-| Icons | lucide-react |
-| Routing | React Router v6 |
-
----
-
-## Quick Start (Docker)
-
-**Prerequisites:** Docker Desktop installed and running.
-
-```bash
-# 1. Clone / open the project
-cd "AI Video-Summarizer"
-
-# 2. Set environment variables
-cp .env.example .env
-# Edit .env — at minimum set:
-#   GROQ_API_KEY=gsk_...       (free at console.groq.com)
-#   SUPABASE_URL=...           (optional — enables email/password auth)
-#   SUPABASE_ANON_KEY=...
-#   SUPABASE_JWT_SECRET=...
-
-# 3. Export your YouTube cookies (fixes YouTube download 403s)
-# Install "Get cookies.txt LOCALLY" in your browser, go to youtube.com,
-# export cookies, and save as:  youtube_cookies.txt  in this folder.
-
-# 4. Start everything
-docker compose up --build
-
-# 5. Open
-# App:      http://localhost:3000
-# API docs: http://localhost:8000/docs  (only in DEBUG=true mode)
-# Health:   http://localhost:8000/health
-# Readiness:http://localhost:8000/ready
-```
-
-**First login:**
-- Without Supabase: Click "Developer access" → enter `my-local-demo-secret`
-- With Supabase: Click "Sign Up" → create an account with your email
-
----
-
-## Local Development
+## Setup
 
 ### Prerequisites
+
 - Python 3.11+
-- Node.js 20+
-- Redis (`redis-server` or Docker)
-- ffmpeg
+- Node 18+
+- PostgreSQL (or a free [Neon.tech](https://neon.tech) account)
+- Redis (or a free [Upstash](https://upstash.com) account — use the `rediss://` URL)
+- Groq API key — free at [console.groq.com](https://console.groq.com)
+- Supabase project — free at [supabase.com](https://supabase.com)
+- ffmpeg installed locally (or included in Docker for Render)
+
+### Backend (local)
 
 ```bash
-# Backend
-cd backend
+git clone https://github.com/SaloniSingh20/lumen-ai-summarizer.git
+cd lumen-ai-summarizer/backend
+
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Copy env
-cp ../.env.example ../.env
-# Edit .env
+cp .env.example .env
+# Edit .env — fill in DATABASE_URL, REDIS_URL, GROQ_API_KEY,
+# SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET
 
-# Start Redis
-redis-server &
-
-# Start API
 uvicorn app.main:app --reload --port 8000
+```
 
-# Start Celery worker (new terminal)
-PYTHONPATH=. celery -A worker.tasks.celery_app worker --loglevel=info -c 2
+Start the Celery worker in a second terminal:
 
-# Frontend (new terminal)
+```bash
+celery -A worker.tasks worker --loglevel=info
+```
+
+API docs available at `http://localhost:8000/docs`
+
+### Frontend (local)
+
+```bash
 cd frontend
 npm install
-# Create frontend/.env.local with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+cp .env.example .env.local
+# Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+# Leave VITE_API_URL empty — Vite's proxy forwards /api → :8000
+
 npm run dev
-# → http://localhost:3000
 ```
 
----
-
-## Authentication
-
-Lumen uses a dual-mode authentication system:
-
-### Production: Supabase Auth
-1. Users sign up / sign in via the Login page (email + password, or Google OAuth)
-2. Supabase issues a short-lived **JWT** (1 hour, auto-refreshed)
-3. The JWT is passed as `Authorization: Bearer <jwt>` on every API request
-4. FastAPI validates the JWT using `SUPABASE_JWT_SECRET` (HS256)
-5. The `sub` claim (Supabase user UUID) becomes `owner_id` on all data rows
-6. Row-Level Security (`migration 002`) enforces isolation at the database level using `auth.uid()`
-
-### Local Dev / Testing: Legacy API Token
-When `SUPABASE_JWT_SECRET` is not set:
-1. Call `POST /auth/tokens` with `X-Admin-Secret: <your ADMIN_SECRET>`
-2. Store the returned UUID token in `localStorage`
-3. Pass it as `Authorization: Bearer <token>`
-
-### Why this design?
-- **No passwords stored** — Supabase handles all credential storage
-- **Token forgery impossible** — 64-char HS256 secret, expiring JWTs
-- **Defence in depth** — application-level owner filter AND database-level RLS
-- **Tests work without Supabase** — legacy token path keeps CI green
+Open `http://localhost:5173`. Sign up, then start uploading videos.
 
 ---
 
-## Environment Variables
+## Deploy
 
-### Backend (`.env`)
+### Frontend — Vercel
 
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `AI_PROVIDER` | `groq` | ✅ | `groq` (free), `api` (Gemini), `local` (Ollama) |
-| `GROQ_API_KEY` | — | ✅ for groq | Get free key at console.groq.com |
-| `SUPABASE_URL` | — | prod | Supabase project URL |
-| `SUPABASE_ANON_KEY` | — | prod | Supabase anon key |
-| `SUPABASE_JWT_SECRET` | — | prod | From Supabase Settings → API → JWT Secret |
-| `DATABASE_URL` | — | prod | Supabase PostgreSQL URI (Session mode, port 5432) |
-| `GOOGLE_API_KEY` | — | if `api` | Gemini API key |
-| `REDIS_URL` | `redis://localhost:6379/0` | ✅ | Redis connection |
-| `ADMIN_SECRET` | `my-local-demo-secret` | ✅ | Secret to create legacy tokens |
-| `SECRET_KEY` | random | ✅ | HMAC key for signed media URLs |
-| `WHISPER_MODEL_SIZE` | `base` | | `tiny`/`base`/`small`/`medium`/`large` |
-| `WHISPER_DEVICE` | `cpu` | | `cpu` or `cuda` |
-| `MAX_UPLOAD_SIZE_MB` | `500` | | Max video file size |
-| `MAX_AI_CALLS_PER_DAY` | `500` | | Daily AI call budget (0=unlimited) |
-| `RATELIMIT_UPLOAD` | `5/minute` | | Upload rate limit |
-| `RATELIMIT_CHAT` | `20/minute` | | Lumen chat rate limit |
-| `SENTRY_DSN` | — | | Sentry error tracking DSN |
-| `LOG_FORMAT` | `pretty` | | `json` for production |
-| `WEB_WORKERS` | `2` | | Gunicorn worker count |
+1. Connect the repo; set the root directory to `frontend/`
+2. Add environment variables in the Vercel dashboard:
 
-### Frontend (`.env.local`)
-
-| Variable | Description |
+| Variable | Value |
 |---|---|
-| `VITE_SUPABASE_URL` | Supabase project URL (from Settings → API) |
-| `VITE_SUPABASE_ANON_KEY` | Supabase anon/public key |
+| `VITE_SUPABASE_URL` | Your Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Your Supabase anon key |
+| `VITE_API_URL` | Your Render backend URL (e.g. `https://lumen-ai-backend-xxxx.onrender.com`) |
 
----
+### Backend — Render (Docker)
 
-## Security
+1. New Web Service → Docker → point to `backend/Dockerfile.render`
+2. Add environment variables:
 
-### 1. Authentication
-- Supabase JWTs validated server-side (HS256, 1-hour expiry, auto-refresh)
-- Legacy tokens (local dev) stored in `user_tokens` table
-- All 401 responses use the `WWW-Authenticate: Bearer` header
+| Variable | Where to get it |
+|---|---|
+| `DATABASE_URL` | Neon.tech → Connection Details → Connection string (port 5432, direct) |
+| `REDIS_URL` | Upstash → Redis database → `rediss://` connection string |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
+| `SUPABASE_URL` | Supabase → Settings → API |
+| `SUPABASE_ANON_KEY` | Supabase → Settings → API |
+| `SUPABASE_JWT_SECRET` | Supabase → Settings → API → JWT Settings |
+| `ENABLE_FAISS` | Set to `False` on free tier (prevents OOM from 130 MB ONNX model) |
+| `AI_PROVIDER` | `groq` |
+| `LOG_FORMAT` | `json` |
 
-### 2. Row-Level Security (Supabase / PostgreSQL)
-`migration 002` enables RLS on all 5 user-data tables using `auth.uid()`:
+### Database migration
+
+Run once in the Neon SQL editor (`console.neon.tech`):
+
 ```sql
-CREATE POLICY "videos_owner_all" ON videos
-    FOR ALL USING (owner_id::uuid = auth.uid());
+CREATE TABLE IF NOT EXISTS user_tokens (
+    id VARCHAR PRIMARY KEY,
+    token VARCHAR UNIQUE NOT NULL,
+    name VARCHAR DEFAULT 'default',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id VARCHAR PRIMARY KEY,
+    owner_id VARCHAR NOT NULL,
+    status VARCHAR DEFAULT 'pending',
+    stage VARCHAR DEFAULT '',
+    progress FLOAT DEFAULT 0.0,
+    error TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS videos (
+    id VARCHAR PRIMARY KEY,
+    job_id VARCHAR UNIQUE REFERENCES jobs(id),
+    owner_id VARCHAR NOT NULL,
+    filename VARCHAR,
+    original_url VARCHAR,
+    file_path VARCHAR,
+    duration FLOAT,
+    has_audio BOOLEAN DEFAULT TRUE,
+    language_detected VARCHAR,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transcript_segments (
+    id SERIAL PRIMARY KEY,
+    video_id VARCHAR REFERENCES videos(id),
+    start FLOAT,
+    "end" FLOAT,
+    text TEXT,
+    embedding_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS scenes (
+    id SERIAL PRIMARY KEY,
+    video_id VARCHAR REFERENCES videos(id),
+    scene_number INTEGER,
+    start_time FLOAT,
+    end_time FLOAT,
+    keyframe_path VARCHAR,
+    description TEXT,
+    scene_label VARCHAR,
+    embedding_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    id SERIAL PRIMARY KEY,
+    video_id VARCHAR UNIQUE REFERENCES videos(id),
+    content_type VARCHAR,
+    language_detected VARCHAR,
+    has_audio BOOLEAN DEFAULT TRUE,
+    title VARCHAR,
+    tldr TEXT,
+    main_topics JSONB,
+    key_concepts JSONB,
+    detailed_notes TEXT,
+    key_takeaways JSONB,
+    visual_summary TEXT,
+    scenes_summary JSONB,
+    confidence_notes TEXT,
+    faiss_index_path VARCHAR,
+    faiss_metadata_path VARCHAR
+);
 ```
-`FORCE ROW LEVEL SECURITY` applies even to the Supabase superuser role.
-For SQLite (local dev), ownership is enforced at the application layer via mandatory `owner_id` filters.
-
-### 3. IDOR Prevention
-- All resource IDs are **UUIDv4** (non-guessable)
-- Every endpoint uses `get_owned_video` / `get_owned_job` dependencies
-- Returns **404** on ownership mismatch — never 403 (prevents enumeration)
-- Files served only through authenticated endpoints (no public static mounts)
-
-### 4. Rate Limiting
-- slowapi + Redis, keyed by Bearer token (per-user, not per-IP)
-- Upload: 5/min + 30/hour · Chat: 20/min · Read: 60/minute
-- All 429 responses include `Retry-After` header
-- Daily AI-call budget guard prevents runaway costs
-
-### 5. SSRF Protection
-URL ingest validates every URL before making any network request:
-- Only `http://` and `https://` schemes
-- Blocks private IPv4 (10.x, 172.16.x, 192.168.x), loopback, link-local
-- Blocks cloud metadata endpoints (169.254.169.254, metadata.google.internal)
-
-### 6. Input Validation
-- File uploads: magic-byte check (not just extension)
-- Filenames: `os.path.basename` prevents path traversal
-- Lumen messages: capped at 1000 characters
-- Generic 500 handler: stack traces never reach clients
 
 ---
 
-## Deployment
+## Environment Variables Reference
 
-### Cloud (Recommended: Render/Railway + Supabase + Vercel)
+### Backend (`backend/.env`)
 
-```
-Backend API  → Render Web Service   (Docker, backend/Dockerfile)
-Worker       → Render Background    (Docker, backend/Dockerfile.worker)
-Redis        → Render Redis         (or Upstash)
-Database     → Supabase PostgreSQL  (free tier, 500 MB)
-Frontend     → Vercel               (npm run build)
-```
-
-**Environment variables for cloud:**
 ```env
-AI_PROVIDER=groq
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/dbname
+
+# Redis (Upstash — always use rediss:// for TLS)
+REDIS_URL=rediss://default:password@host.upstash.io:6379
+
+# AI
 GROQ_API_KEY=gsk_...
-SUPABASE_URL=https://xxx.supabase.co
+AI_PROVIDER=groq
+
+# Auth (Supabase)
+SUPABASE_URL=https://xxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
-SUPABASE_JWT_SECRET=your-64-char-secret
-DATABASE_URL=postgresql://postgres.xxx:password@aws-0-region.pooler.supabase.com:5432/postgres
-REDIS_URL=redis://...
-LOG_FORMAT=json
-WEB_WORKERS=2
+SUPABASE_JWT_SECRET=your-jwt-secret
+
+# Processing
+ENABLE_FAISS=False          # False on Render free tier (512 MB RAM)
+MAX_UPLOAD_SIZE_MB=500
+MAX_SCENES=100
+
+# Optional
+SENTRY_DSN=                 # leave empty to disable error tracking
+LOG_FORMAT=json             # json for production, pretty for local dev
+MAX_AI_CALLS_PER_DAY=500    # 0 = unlimited
 ```
 
-**Supabase setup steps:**
-1. Create project at supabase.com
-2. Enable email auth: Authentication → Providers → Email
-3. (Optional) Enable Google OAuth: Authentication → Providers → Google
-4. Run `backend/migrations/001_initial_schema.sql` in SQL Editor
-5. Run `backend/migrations/002_supabase_auth_rls.sql` in SQL Editor
-6. Copy `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET` from Settings → API
+### Frontend (`frontend/.env.local`)
 
-**Frontend Vercel setup:**
-```bash
-cd frontend
-vercel deploy
-# Set env vars in Vercel dashboard:
-#   VITE_SUPABASE_URL
-#   VITE_SUPABASE_ANON_KEY
-```
-
-### Local / Offline (Ollama)
-
-For fully offline use without any API keys:
-```bash
-# Install Ollama from ollama.com
-ollama pull llama3.1:8b
-ollama pull llava:7b   # or llama-3.2-vision
-
-# In .env:
-AI_PROVIDER=local
-OLLAMA_BASE_URL=http://localhost:11434
+```env
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
+VITE_API_URL=https://lumen-ai-backend-xxxx.onrender.com
+# Leave VITE_API_URL empty for local dev — Vite proxy handles /api → :8000
 ```
 
 ---
 
-## Running Tests
+## Free Tier Constraints and Workarounds
 
-```bash
-cd backend
-
-# Install test dependencies (if not already installed)
-pip install pytest pytest-asyncio httpx
-
-# Run all tests (no Redis, no Supabase needed — uses in-memory mocks)
-python -m pytest tests/ -v
-
-# Run specific suites
-python -m pytest tests/test_auth_jwt.py      -v   # JWT auth tests
-python -m pytest tests/test_api_endpoints.py -v   # API + IDOR tests
-python -m pytest tests/test_pipeline_utils.py -v  # Pipeline utils
-python -m pytest tests/test_security.py      -v   # Security tests
-python -m pytest tests/test_ssrf.py          -v   # SSRF unit tests
-python -m pytest tests/test_time_parser.py   -v   # Time parser
-```
-
-**Test coverage:**
-- ✅ JWT validation (valid, expired, tampered, wrong audience)
-- ✅ Legacy token auth (valid, revoked, random string)
-- ✅ IDOR — cross-user access always returns 404
-- ✅ Rate limiting — 3rd request returns 429 with Retry-After
-- ✅ SSRF — 15+ blocked URL patterns
-- ✅ File-type magic bytes — valid MP4/MKV pass, JPEG/Python reject
-- ✅ AI budget guard — exceeding limit blocks new jobs
-- ✅ Error sanitisation — no stack traces in responses
-- ✅ Time parser — 12 query formats
-- ✅ Scene detection fallback — always ≥1 scene
-- ✅ Media token — sign, verify, expiry, tamper
+| Constraint | Workaround |
+|---|---|
+| Render 512 MB RAM limit | `ENABLE_FAISS=False` skips the 130 MB fastembed ONNX model load entirely |
+| YouTube downloads blocked on cloud server IPs | `youtube-transcript-api` fallback fetches captions without downloading the video |
+| Render container sleeps after 15 min inactivity | Upload page polls `/health` in a retry loop and enables the submit button only when the server is awake |
+| Upstash Redis requires TLS (`rediss://`) | All Redis clients (Celery broker, cache module, budget guard) explicitly pass `ssl_cert_reqs=CERT_NONE` |
+| Neon PostgreSQL serverless pooler (port 6543) | SQLAlchemy uses `NullPool` when port 6543 is detected in `DATABASE_URL` |
+| Render ephemeral filesystem | Video files go to `/tmp/uploads/`, keyframes to `/tmp/keyframes/` |
+| Pydantic v2 rejects `uuid.UUID` as `str` | All ID fields use `field_validator(mode='before')` to coerce UUID objects to strings |
 
 ---
 
 ## API Reference
 
-### Authentication
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/auth/me` | ✅ | Current user info |
-| `POST` | `/auth/tokens` | Admin secret | Create legacy token (local dev) |
-| `DELETE` | `/auth/tokens/self` | ✅ | Revoke own token |
-
-### Jobs
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/jobs/upload` | ✅ | Upload video file |
-| `POST` | `/jobs/url` | ✅ | Submit YouTube/video URL |
-| `GET` | `/jobs/{id}` | ✅ (owner) | Poll job status + progress |
-| `GET` | `/jobs` | ✅ | List own jobs |
-
-### Videos
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/videos` | ✅ | List own videos (dashboard) |
-| `GET` | `/videos/{id}` | ✅ (owner) | Full video data + notes |
-| `GET` | `/videos/{id}/search?q=...` | ✅ (owner) | Semantic search |
-| `GET` | `/videos/{id}/analytics` | ✅ (owner) | Analytics data |
-| `GET` | `/videos/{id}/export/pdf` | ✅ (owner) | Download PDF |
-| `GET` | `/videos/{id}/keyframes/{n}` | ✅ (owner) | Serve keyframe image |
-| `GET` | `/videos/{id}/media-token` | ✅ (owner) | Issue signed video stream token |
-| `GET` | `/videos/{id}/stream?token=...` | Signed token | Stream video file |
-
-### Lumen Chat
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/videos/{id}/chat` | ✅ (owner) | Q&A with time-range support |
-| `GET` | `/videos/{id}/chat/suggestions` | ✅ (owner) | Quick-reply suggestions |
-
-### Ops
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness probe |
-| `GET` | `/ready` | Readiness probe (checks DB + Redis) |
+| `GET` | `/health` | Liveness probe — confirms process is alive |
+| `GET` | `/ready` | Readiness probe — checks DB and Redis connectivity |
+| `POST` | `/jobs/upload` | Upload a video file (multipart/form-data) |
+| `POST` | `/jobs/url` | Submit a YouTube or direct video URL |
+| `GET` | `/jobs/{job_id}` | Poll job status, stage, and progress |
+| `GET` | `/videos` | List all videos for the authenticated user |
+| `GET` | `/videos/{video_id}` | Full video data: transcript, scenes, notes |
+| `GET` | `/videos/{video_id}/analytics` | Word frequency, speaking ratio, scene count |
+| `POST` | `/videos/{video_id}/chat` | Ask Lumen a question about the video |
+| `GET` | `/videos/{video_id}/search?q=` | Semantic search across transcript and scenes |
+| `GET` | `/videos/{video_id}/export/pdf` | Download notes as a styled PDF |
+| `GET` | `/videos/{video_id}/media-token` | Get a short-lived signed stream token (5 min TTL) |
+| `GET` | `/videos/{video_id}/stream?token=` | Stream the video file (requires signed token) |
+| `GET` | `/videos/{video_id}/keyframes/{scene_number}` | Serve a scene keyframe image |
+
+All endpoints require `Authorization: Bearer <supabase_jwt>`. All video and job endpoints return 404 (not 403) on ownership mismatch to avoid leaking resource existence.
 
 ---
 
-## Resume Bullet Points
+## Future Work
 
-- Architected a **full-stack multimodal AI platform** (FastAPI + React/TypeScript) that fuses audio transcription (faster-whisper) with visual scene understanding (Groq Vision) to generate structured notes, semantic search, and a conversational Q&A assistant
+- **FAISS semantic search on free tier** — host embeddings externally or use a quantized model that fits in 512 MB RAM
+- **Whisper local model option** — `faster-whisper` for self-hosted deployments without Groq dependency
+- **Chapters** — auto-generate YouTube-style chapter markers from scene labels and notes structure
+- **Share links** — optional public read-only link for a processed video
+- **Batch processing** — queue multiple videos with progress notifications per item
+- **Webhook support** — POST to a user-configured URL when processing completes
+- **Export to Notion / Obsidian** — push structured notes directly to knowledge management tools
+- **Mobile PWA** — install as a home-screen app on iOS and Android
 
-- Implemented **Supabase Auth** with JWT validation and PostgreSQL **Row-Level Security** (`auth.uid()` policies + `FORCE ROW LEVEL SECURITY`) ensuring users can only access their own data even under direct database access or SQL injection
+---
 
-- Built a **defence-in-depth security layer**: Supabase JWT authentication, per-user rate limiting (slowapi + Redis), IDOR prevention (always-404 ownership checks on all endpoints), SSRF URL validation blocking 15+ attack patterns, magic-byte file-type validation, and daily AI-call budget guard
+## Troubleshooting
 
-- Designed a **resumable 10-stage async pipeline** (Celery + Redis) with live progress updates; processes video from raw URL → structured JSON notes in minutes using yt-dlp, ffmpeg, Whisper, PySceneDetect, and Groq
+**"Server is starting up" on first use**
+Render free tier sleeps after 15 minutes of inactivity. The upload page automatically polls `/health` and enables the button once the server is awake (~30–60 seconds on a cold start).
 
-- Shipped **semantic search** with FAISS + sentence-transformers; users can ask natural questions and jump directly to the relevant moment in the video
+**YouTube video fails even after retrying**
+Lumen tries four yt-dlp client strategies (tv_embedded, mweb, ios, default) then falls back to the YouTube Captions API. If all fail, the video likely has no captions and the server IP is blocked — upload the video file directly as a workaround.
 
-- Implemented **Lumen**, a video-aware chat assistant with robust time-range parsing ("what happened from 1:30 to 2:00?"), RAG over transcript + visual descriptions, and anti-hallucination prompting
+**Chat returns "Sorry, something went wrong"**
+Usually a Redis SSL issue. Confirm `REDIS_URL` in Render starts with `rediss://` (not `redis://`) and matches exactly what Upstash shows.
 
-- Wrote **comprehensive test suite** (46+ tests) covering JWT security, IDOR attacks, rate limiting, SSRF, file-type validation, scene detection, and time-range parsing — all run without external services via in-memory mocks
+**PDF download does nothing**
+`VITE_API_URL` in Vercel is probably empty or wrong. It must point to the full Render backend URL (e.g. `https://lumen-ai-backend-xxxx.onrender.com`). Without it the PDF request hits Vercel's CDN, not the backend.
 
-- Containerised with **Docker + docker-compose** (4 services); documented full deployment pipeline to Supabase + Render + Vercel with environment-specific configuration
+**Processing stuck at "Processing..." forever**
+The Celery worker shares the container with the API. If Render restarted mid-task, clear stuck jobs in the Neon SQL editor:
+```sql
+UPDATE jobs
+SET status = 'failed', error = 'Cancelled — container restarted'
+WHERE status IN ('pending', 'processing');
+```
+
+---
+
+## License
+
+All rights reserved unless otherwise stated.

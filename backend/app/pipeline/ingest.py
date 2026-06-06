@@ -116,6 +116,60 @@ def _friendly_error(url: str, raw_error: str) -> str:
     )
 
 
+def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
+    """
+    Fetch captions from YouTube's caption API without downloading the video.
+    Used as a fallback when yt-dlp is blocked by server IP restrictions.
+    Returns (segments, language_code).
+    Raises RuntimeError if no transcript is available.
+    """
+    import re
+    yt_match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
+    if not yt_match:
+        raise RuntimeError("Not a valid YouTube URL")
+    video_id = yt_match.group(1)
+
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+    except ImportError:
+        raise RuntimeError("youtube-transcript-api not installed")
+
+    try:
+        # Try preferred languages first, then fall back to any available
+        for lang_pref in [["en", "en-US", "en-GB"], None]:
+            try:
+                if lang_pref:
+                    raw = YouTubeTranscriptApi.get_transcript(video_id, languages=lang_pref)
+                    lang = "en"
+                else:
+                    transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+                    first = next(iter(transcripts))
+                    raw = first.fetch()
+                    lang = first.language_code
+                break
+            except Exception:
+                if lang_pref is None:
+                    raise
+                continue
+
+        segments = [
+            {
+                "start": float(item.get("start", 0)),
+                "end": float(item.get("start", 0)) + float(item.get("duration", 1)),
+                "text": str(item.get("text", "")).strip(),
+            }
+            for item in raw
+            if str(item.get("text", "")).strip()
+        ]
+        if not segments:
+            raise RuntimeError("Transcript is empty")
+        return segments, lang
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"YouTube captions unavailable for this video: {e}")
+
+
 def get_filename_from_url(url: str) -> str:
     """Extract a clean display filename from a URL."""
     import re

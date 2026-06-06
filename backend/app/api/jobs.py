@@ -1,8 +1,11 @@
 """Job management endpoints — rate-limited, authenticated, IDOR-safe."""
+import logging
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from ..database import get_db
 from ..models import Job, Video
@@ -78,8 +81,14 @@ async def submit_url(
 
     try:
         file_path = download_url(url, upload_path)
-    except Exception as e:
-        raise HTTPException(400, str(e))
+    except Exception as download_err:
+        # yt-dlp failed — for YouTube URLs try transcript-only fallback before giving up
+        if _is_youtube_url(url):
+            try:
+                return _submit_youtube_transcript_only(db, video_id, url, current_user.id)
+            except Exception as transcript_err:
+                logger.warning(f"Transcript fallback also failed for {url}: {transcript_err}")
+        raise HTTPException(400, str(download_err))
 
     filename = get_filename_from_url(url)
     return _create_job_and_enqueue(db, video_id, file_path, filename, url, current_user.id)
@@ -148,3 +157,66 @@ def _create_job_and_enqueue(
     process_video_task.delay(job.id, video_id)
 
     return UploadResponse(job_id=job.id, video_id=video_id, message="Job queued successfully")
+
+
+def _is_youtube_url(url: str) -> bool:
+    return "youtube.com/watch" in url or "youtu.be/" in url
+
+
+def _submit_youtube_transcript_only(
+    db: Session,
+    video_id: str,
+    url: str,
+    owner_id: str,
+) -> UploadResponse:
+    """
+    Fallback for YouTube URLs when yt-dlp download fails.
+    Fetches captions via youtube-transcript-api and queues a lightweight
+    transcript-only notes-generation task (no video file needed).
+    """
+    from ..pipeline.ingest import fetch_youtube_transcript
+    from worker.tasks import process_transcript_only_task
+    from ..models import TranscriptSegment as TSModel
+
+    segments, language = fetch_youtube_transcript(url)  # raises RuntimeError if unavailable
+
+    filename = get_filename_from_url(url)
+    duration = max((s["end"] for s in segments), default=None)
+
+    job = Job(
+        id=str(uuid.uuid4()),
+        owner_id=owner_id,
+        status="processing",
+        stage="Transcript fetched — generating notes",
+        progress=20.0,
+    )
+    db.add(job)
+    db.flush()
+
+    video = Video(
+        id=video_id,
+        job_id=job.id,
+        owner_id=owner_id,
+        filename=filename,
+        file_path="",
+        original_url=url,
+        duration=duration,
+        has_audio=True,
+        language_detected=language,
+    )
+    db.add(video)
+    db.flush()
+
+    for seg in segments:
+        db.add(TSModel(
+            video_id=video_id,
+            start=seg["start"],
+            end=seg["end"],
+            text=seg["text"],
+        ))
+
+    db.commit()
+
+    process_transcript_only_task.delay(job.id, video_id)
+
+    return UploadResponse(job_id=job.id, video_id=video_id, message="Transcript fetched — generating notes")

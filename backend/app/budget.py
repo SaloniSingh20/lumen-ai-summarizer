@@ -22,8 +22,12 @@ def _get_redis(redis_url: str):
     global _redis_client
     if _redis_client is not None:
         return _redis_client
+    import ssl as _ssl
     import redis as redis_lib
-    return redis_lib.from_url(redis_url, decode_responses=True)
+    kwargs: dict = {"decode_responses": True}
+    if redis_url.startswith("rediss://"):
+        kwargs["ssl_cert_reqs"] = _ssl.CERT_NONE
+    return redis_lib.from_url(redis_url, **kwargs)
 
 
 def check_budget(redis_url: str, max_calls: int) -> int:

@@ -31,6 +31,72 @@ STAGES = [
 ]
 
 
+def run_transcript_only_pipeline(job_id: str, video_id: str, db: Session):
+    """
+    Lightweight pipeline for YouTube videos where yt-dlp download failed.
+    Transcript segments are already in the DB; this stage just generates notes.
+    """
+    provider = get_provider()
+    try:
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            raise ValueError(f"Video {video_id} not found")
+
+        set_rls_context(db, video.owner_id)
+
+        update_job(db, job_id, "Loading transcript", 20)
+        segments = db.query(TSModel).filter(TSModel.video_id == video_id).order_by(TSModel.start).all()
+        transcript_segments_data = [{"start": s.start, "end": s.end, "text": s.text} for s in segments]
+        detected_language = video.language_detected or "en"
+
+        if not transcript_segments_data:
+            raise ValueError("No transcript segments — cannot generate notes")
+
+        update_job(db, job_id, "Generating notes", 60)
+        from ..providers.base import TranscriptSegment as TSObj
+        ts_objs = [TSObj(start=s["start"], end=s["end"], text=s["text"]) for s in transcript_segments_data]
+        notes_data = provider.generate_notes(ts_objs, [], has_audio=True, language=detected_language)
+
+        notes = Notes(
+            video_id=video_id,
+            content_type=notes_data.get("content_type"),
+            language_detected=notes_data.get("language_detected", detected_language),
+            has_audio=True,
+            title=notes_data.get("title"),
+            tldr=notes_data.get("tldr"),
+            main_topics=notes_data.get("main_topics", []),
+            key_concepts=notes_data.get("key_concepts", []),
+            detailed_notes=notes_data.get("detailed_notes"),
+            key_takeaways=notes_data.get("key_takeaways", []),
+            visual_summary=notes_data.get("visual_summary"),
+            scenes_summary=notes_data.get("scenes", []),
+            confidence_notes=notes_data.get("confidence_notes"),
+        )
+        db.add(notes)
+        db.commit()
+
+        update_job(db, job_id, "Complete", 100)
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            job.status = "completed"
+            job.progress = 100.0
+            job.stage = "Complete"
+            db.commit()
+
+        from ..cache import invalidate_video
+        invalidate_video(video_id)
+        logger.info(f"Transcript-only pipeline completed for video {video_id}")
+
+    except Exception as e:
+        logger.exception(f"Transcript-only pipeline failed for job {job_id}: {e}")
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            job.status = "failed"
+            job.error = str(e)
+            db.commit()
+        raise
+
+
 def update_job(db: Session, job_id: str, stage: str, progress: float):
     job = db.query(Job).filter(Job.id == job_id).first()
     if job:

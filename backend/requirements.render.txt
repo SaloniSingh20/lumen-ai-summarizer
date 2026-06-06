@@ -29,6 +29,7 @@ faiss-cpu==1.8.0
 opencv-python-headless==4.10.0.84
 scenedetect[opencv]==0.6.4
 yt-dlp
+youtube-transcript-api>=0.6.0
 
 # PDF Export
 reportlab==4.2.0

@@ -34,6 +34,24 @@ celery_app.conf.update(
 )
 
 
+@celery_app.task(bind=True, name="worker.tasks.process_transcript_only_task", max_retries=1)
+def process_transcript_only_task(self, job_id: str, video_id: str):
+    """Celery task for YouTube transcript-only processing (no video download)."""
+    from app.database import SessionLocal
+    from app.pipeline.runner import run_transcript_only_pipeline
+
+    db = SessionLocal()
+    try:
+        logger.info(f"Starting transcript-only pipeline for job {job_id}, video {video_id}")
+        run_transcript_only_pipeline(job_id, video_id, db)
+        logger.info(f"Transcript-only pipeline complete for job {job_id}")
+    except Exception as exc:
+        logger.exception(f"Transcript-only task failed for job {job_id}: {exc}")
+        raise
+    finally:
+        db.close()
+
+
 @celery_app.task(bind=True, name="worker.tasks.process_video_task", max_retries=1)
 def process_video_task(self, job_id: str, video_id: str):
     """Main Celery task: run the full video processing pipeline."""
