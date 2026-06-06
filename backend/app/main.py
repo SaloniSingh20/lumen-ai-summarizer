@@ -148,6 +148,12 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 
 # ── Generic error handler — no stack traces to clients ───────────────────
+_ALLOWED_ORIGINS = {
+    "https://lumen-ai-summarizer.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+}
+
 @app.exception_handler(Exception)
 async def generic_error_handler(request: Request, exc: Exception):
     logger.exception(
@@ -156,9 +162,15 @@ async def generic_error_handler(request: Request, exc: Exception):
         path=request.url.path,
         exc_type=type(exc).__name__,
     )
+    origin = request.headers.get("origin", "")
+    extra_headers = {}
+    if origin in _ALLOWED_ORIGINS:
+        extra_headers["Access-Control-Allow-Origin"] = origin
+        extra_headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal error occurred"},
+        headers=extra_headers,
     )
 
 

@@ -99,13 +99,16 @@ def _verify_supabase_token(token: str) -> Optional[AuthUser]:
 # ── Legacy API-token fallback ─────────────────────────────────────────────────
 
 def _verify_legacy_token(token: str, db: Session) -> Optional[AuthUser]:
-    from .models import UserToken
-    row = (
-        db.query(UserToken)
-        .filter(UserToken.token == token, UserToken.is_active.is_(True))
-        .first()
-    )
-    return AuthUser(id=row.id, email="", source="token") if row else None
+    try:
+        from .models import UserToken
+        row = (
+            db.query(UserToken)
+            .filter(UserToken.token == token, UserToken.is_active.is_(True))
+            .first()
+        )
+        return AuthUser(id=row.id, email="", source="token") if row else None
+    except Exception:
+        return None
 
 
 # ── FastAPI dependency ────────────────────────────────────────────────────────
