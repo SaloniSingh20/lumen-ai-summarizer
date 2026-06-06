@@ -9,9 +9,11 @@
  */
 import { getAccessToken, supabase } from './supabase'
 
+// Strip BOM (U+FEFF) that PowerShell injects when setting Vercel env vars
+const _stripBom = (s: string) => s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s
 // Local dev: VITE_API_URL is empty → BASE='/api', Vite proxy strips /api before forwarding to :8000
 // Production: VITE_API_URL is set → BASE=external URL, backend routes served directly (no /api prefix)
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+const BASE = _stripBom(import.meta.env.VITE_API_URL ?? '/api')
 
 // --------------------------------------------------------------------------
 // Legacy token storage (used when Supabase is not configured)
