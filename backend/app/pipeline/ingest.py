@@ -143,6 +143,14 @@ def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
         except Exception:
             pass
 
+        # Try any language (auto-generated for non-English videos)
+        if raw is None:
+            try:
+                raw = YouTubeTranscriptApi.get_transcript(video_id)
+                lang = "en"
+            except Exception:
+                pass
+
         if raw is None:
             transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
             transcript = None

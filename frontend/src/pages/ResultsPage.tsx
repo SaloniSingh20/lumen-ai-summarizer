@@ -92,8 +92,12 @@ export default function ResultsPage() {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `lumen-notes-${videoId.slice(0, 8)}.pdf`; a.click()
-      URL.revokeObjectURL(url)
+      a.href = url
+      a.download = `lumen-notes-${videoId.slice(0, 8)}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download PDF')
     } finally {
