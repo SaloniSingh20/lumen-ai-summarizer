@@ -1,7 +1,11 @@
 """Generate styled PDF from notes using ReportLab."""
 import io
 from typing import Optional
-from xml.sax.saxutils import escape as _xe
+from xml.sax.saxutils import escape as _escape
+
+def _xe(v) -> str:
+    """Escape XML special chars; accepts any type (None → empty string)."""
+    return _escape(str(v) if v is not None else "")
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

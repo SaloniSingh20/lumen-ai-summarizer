@@ -118,10 +118,9 @@ def _friendly_error(url: str, raw_error: str) -> str:
 
 def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
     """
-    Fetch captions from YouTube's caption API without downloading the video.
-    Used as a fallback when yt-dlp is blocked by server IP restrictions.
-    Returns (segments, language_code).
-    Raises RuntimeError if no transcript is available.
+    Fetch captions for a YouTube video without downloading it.
+    Tries three independent strategies in order; raises RuntimeError only
+    after all three have failed.
     """
     import re
     yt_match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
@@ -129,72 +128,81 @@ def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
         raise RuntimeError("Not a valid YouTube URL")
     video_id = yt_match.group(1)
 
+    # ── Strategy 1: youtube-transcript-api ──────────────────────────────────
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-    except ImportError:
-        raise RuntimeError("youtube-transcript-api not installed")
 
-    try:
-        # Try preferred languages first, then auto-generated, then any available
         raw = None
         lang = "en"
+
+        # 1a: English-specific
         try:
             raw = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
         except Exception:
             pass
 
-        # Try any language (auto-generated for non-English videos)
+        # 1b: Any language (covers non-English auto-generated captions)
         if raw is None:
             try:
                 raw = YouTubeTranscriptApi.get_transcript(video_id)
-                lang = "en"
             except Exception:
                 pass
 
+        # 1c: list_transcripts — prefer auto-generated, fall back to first available
         if raw is None:
-            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript = None
-            # Prefer auto-generated (widely available) over manually created
-            for finder in (
-                lambda t: t.find_generated_transcript(["en", "en-US", "en-GB"]),
-                lambda t: t.find_manually_created_transcript(["en", "en-US", "en-GB"]),
-                lambda t: next(iter(t)),
-            ):
-                try:
-                    transcript = finder(transcripts)
-                    break
-                except Exception:
-                    continue
-            if transcript is None:
-                raise RuntimeError("No transcripts found")
-            raw = transcript.fetch()
-            lang = transcript.language_code
+            try:
+                tlist = YouTubeTranscriptApi.list_transcripts(video_id)
+                t = None
+                for finder in (
+                    lambda tl: tl.find_generated_transcript(["en", "en-US", "en-GB"]),
+                    lambda tl: tl.find_manually_created_transcript(["en", "en-US", "en-GB"]),
+                    lambda tl: next(iter(tl)),
+                ):
+                    try:
+                        t = finder(tlist)
+                        break
+                    except Exception:
+                        continue
+                if t is not None:
+                    raw = t.fetch()
+                    lang = t.language_code
+            except Exception:
+                pass  # fall through to strategy 2
 
-        # Final fallback: yt-dlp subtitle download (bypasses transcript API blocks)
-        if not raw:
-            return _fetch_subtitles_ytdlp(video_id)
+        if raw is not None:
+            segments = _parse_raw_transcript(raw)
+            if segments:
+                return segments, lang
 
-        segments = []
-        for item in raw:
-            # Support both dict (v0.x) and object (newer API) responses
-            if isinstance(item, dict):
-                start = float(item.get("start", 0))
-                dur   = float(item.get("duration", 1))
-                text  = str(item.get("text", "")).strip()
-            else:
-                start = float(getattr(item, "start", 0))
-                dur   = float(getattr(item, "duration", 1))
-                text  = str(getattr(item, "text", "")).strip()
-            if text:
-                segments.append({"start": start, "end": start + dur, "text": text})
+    except ImportError:
+        pass  # library not installed — try strategy 2
 
-        if not segments:
-            raise RuntimeError("Transcript is empty")
-        return segments, lang
-    except RuntimeError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"YouTube captions unavailable for this video: {e}")
+    # ── Strategy 2: yt-dlp --write-auto-subs --skip-download ────────────────
+    try:
+        return _fetch_subtitles_ytdlp(video_id)
+    except Exception as ytdlp_err:
+        raise RuntimeError(
+            f"YouTube captions unavailable for this video. "
+            f"Tried youtube-transcript-api and yt-dlp subtitles — both failed. "
+            f"Last error: {ytdlp_err}"
+        )
+
+
+def _parse_raw_transcript(raw) -> list[dict]:
+    """Convert youtube-transcript-api raw result (list of dicts or FetchedTranscript) to segments."""
+    segments = []
+    for item in raw:
+        if isinstance(item, dict):
+            start = float(item.get("start", 0))
+            dur   = float(item.get("duration", 1))
+            text  = str(item.get("text", "")).strip()
+        else:
+            start = float(getattr(item, "start", 0))
+            dur   = float(getattr(item, "duration", 1))
+            text  = str(getattr(item, "text", "")).strip()
+        if text:
+            segments.append({"start": start, "end": start + dur, "text": text})
+    return segments
 
 
 def _fetch_subtitles_ytdlp(video_id: str) -> tuple[list[dict], str]:
