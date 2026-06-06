@@ -11,6 +11,9 @@ celery_app = Celery(
     include=["worker.tasks"],
 )
 
+import ssl as _ssl
+_ssl_opts = {"ssl_cert_reqs": _ssl.CERT_NONE}
+
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -20,4 +23,6 @@ celery_app.conf.update(
     task_track_started=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    broker_use_ssl=_ssl_opts,
+    redis_backend_use_ssl=_ssl_opts,
 )

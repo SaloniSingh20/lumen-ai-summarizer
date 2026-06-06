@@ -10,11 +10,15 @@ _redis_default = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 _broker  = os.environ.get("CELERY_BROKER_URL")  or _redis_default
 _backend = os.environ.get("CELERY_RESULT_BACKEND") or _redis_default
 
+import ssl as _ssl
+
 celery_app = Celery(
     "video_summarizer",
     broker=_broker,
     backend=_backend,
 )
+
+_ssl_opts = {"ssl_cert_reqs": _ssl.CERT_NONE}
 
 celery_app.conf.update(
     task_serializer="json",
@@ -25,6 +29,8 @@ celery_app.conf.update(
     task_track_started=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    broker_use_ssl=_ssl_opts,
+    redis_backend_use_ssl=_ssl_opts,
 )
 
 
