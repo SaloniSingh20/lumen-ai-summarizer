@@ -186,31 +186,34 @@ def run_pipeline(job_id: str, video_id: str, db: Session):
         db.add(notes)
         db.commit()
 
-        # --- Stage 9: Build FAISS index (best-effort — skip on OOM) ---
+        # --- Stage 9: Build FAISS index (skipped when ENABLE_FAISS=False) ---
         update_job(db, job_id, "Building search index", 92)
-        db_scenes_data = [
-            {
-                "start_time": s.start_time,
-                "end_time": s.end_time,
-                "description": s.description,
-                "scene_label": s.scene_label,
-                "scene_number": s.scene_number,
-            }
-            for s in db_scenes
-        ]
-        try:
-            index_path, meta_path = build_faiss_index(
-                transcript_segments_data,
-                db_scenes_data,
-                provider,
-                faiss_dir,
-                video_id,
-            )
-            notes.faiss_index_path = index_path
-            notes.faiss_metadata_path = meta_path
-            db.commit()
-        except Exception as emb_err:
-            logger.warning(f"FAISS index skipped (memory/model error): {emb_err}")
+        if settings.ENABLE_FAISS:
+            db_scenes_data = [
+                {
+                    "start_time": s.start_time,
+                    "end_time": s.end_time,
+                    "description": s.description,
+                    "scene_label": s.scene_label,
+                    "scene_number": s.scene_number,
+                }
+                for s in db_scenes
+            ]
+            try:
+                index_path, meta_path = build_faiss_index(
+                    transcript_segments_data,
+                    db_scenes_data,
+                    provider,
+                    faiss_dir,
+                    video_id,
+                )
+                notes.faiss_index_path = index_path
+                notes.faiss_metadata_path = meta_path
+                db.commit()
+            except Exception as emb_err:
+                logger.warning(f"FAISS index skipped (memory/model error): {emb_err}")
+        else:
+            logger.info("FAISS index disabled (ENABLE_FAISS=False)")
 
         # --- Stage 10: Finalize ---
         update_job(db, job_id, "Complete", 100)

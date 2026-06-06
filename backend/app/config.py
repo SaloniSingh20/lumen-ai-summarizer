@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     MAX_SCENES: int = 100
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     FAISS_TOP_K: int = 5
+    # Set to False on memory-constrained hosts (Render free tier 512 MB).
+    # fastembed loads a ~130 MB ONNX model that causes OOM on free tier.
+    ENABLE_FAISS: bool = True
 
     # Celery — defaults to REDIS_URL if not explicitly set
     CELERY_BROKER_URL: str = ""

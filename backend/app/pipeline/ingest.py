@@ -12,11 +12,13 @@ logger = logging.getLogger(__name__)
 _COOKIES_FILE = "/cookies/youtube_cookies.txt"
 
 _YT_STRATEGIES = [
-    # Android client is most reliable in 2026 — no PO token required, no nsig issues
-    ["--extractor-args", "youtube:player_client=android"],
-    # Fallback: android + web combined
-    ["--extractor-args", "youtube:player_client=android,web"],
-    # Last resort: default
+    # tv_embedded: most reliable on server IPs in 2026 — no PO token, no nsig
+    ["--extractor-args", "youtube:player_client=tv_embedded"],
+    # mweb: mobile web client, good fallback
+    ["--extractor-args", "youtube:player_client=mweb"],
+    # ios: another option that bypasses server IP blocks
+    ["--extractor-args", "youtube:player_client=ios"],
+    # Last resort: default client
     [],
 ]
 
@@ -61,10 +63,12 @@ def download_url(url: str, output_dir: str) -> str:
     base_cmd = [
         "yt-dlp",
         "--no-playlist",
-        "--format", "best[height<=720][ext=mp4]/best[height<=720]/best",
+        "--format", "best[height<=480][ext=mp4]/best[height<=480]/best[height<=720]/best",
         "-o", output_template,
         "--no-warnings",
         "--socket-timeout", "30",
+        "--force-ipv4",          # Render free tier: IPv4 only
+        "--no-check-certificates",
     ] + cookie_args
 
     last_error = ""
