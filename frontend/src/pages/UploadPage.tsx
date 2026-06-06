@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { motion } from 'framer-motion'
@@ -36,22 +36,40 @@ export default function UploadPage() {
   const [url, setUrl]       = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState('')
+  const [warming, setWarming] = useState(true)
+
+  // Ping backend on mount so Render free-tier wakes up before user hits Submit
+  useEffect(() => {
+    api.health().catch(() => {}).finally(() => setWarming(false))
+  }, [])
 
   const handleFile = useCallback(async (file: File) => {
     setLoading(true); setError('')
-    try {
-      const { job_id, video_id } = await api.uploadFile(file)
-      navigate(`/processing/${job_id}/${video_id}`)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Upload failed')
-      setLoading(false)
+    // Retry once on "Failed to fetch" (Render cold start can cause a transient failure)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { job_id, video_id } = await api.uploadFile(file)
+        navigate(`/processing/${job_id}/${video_id}`)
+        return
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Upload failed'
+        if (attempt === 0 && msg === 'Failed to fetch') {
+          await new Promise(r => setTimeout(r, 4000)) // wait 4s for backend to wake
+          continue
+        }
+        setError(msg === 'Failed to fetch'
+          ? 'Could not reach the server. Please wait a few seconds and try again.'
+          : msg)
+        setLoading(false)
+        return
+      }
     }
   }, [navigate])
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     accept:      ACCEPTED_TYPES,
     maxFiles:    1,
-    disabled:    loading,
+    disabled:    loading || warming,
     onDropAccepted:  ([f]) => handleFile(f),
     onDropRejected:  ()    => setError('Invalid file type. Please drop a video file (MP4, MOV, MKV, AVI, WebM).'),
   })
@@ -60,12 +78,27 @@ export default function UploadPage() {
     e.preventDefault()
     if (!url.trim()) return
     setLoading(true); setError('')
-    try {
-      const { job_id, video_id } = await api.submitUrl(url.trim())
-      navigate(`/processing/${job_id}/${video_id}`)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to process URL')
-      setLoading(false)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { job_id, video_id } = await api.submitUrl(url.trim())
+        navigate(`/processing/${job_id}/${video_id}`)
+        return
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to process URL'
+        if (attempt === 0 && msg === 'Failed to fetch') {
+          await new Promise(r => setTimeout(r, 4000))
+          continue
+        }
+        let friendly = msg
+        if (msg === 'Failed to fetch') friendly = 'Could not reach the server. Please wait a few seconds and try again.'
+        else if (msg.toLowerCase().includes('account') || msg.toLowerCase().includes('login') || msg.toLowerCase().includes('sign in'))
+          friendly = 'This video is private or age-restricted. Try a public YouTube video URL (youtube.com/watch?v=...)'
+        else if (msg.toLowerCase().includes('shorts'))
+          friendly = 'YouTube Shorts require an account. Paste a regular YouTube URL: youtube.com/watch?v=...'
+        setError(friendly)
+        setLoading(false)
+        return
+      }
     }
   }
 
@@ -178,11 +211,13 @@ export default function UploadPage() {
                 }
                 <div>
                   <p className="text-base font-semibold text-plum mb-1">
-                    {loading ? 'Uploading…' : isDragActive ? 'Drop to analyze' : 'Drop your video here'}
+                    {loading ? 'Uploading…' : warming ? 'Connecting to server…' : isDragActive ? 'Drop to analyze' : 'Drop your video here'}
                   </p>
                   <p className="text-sm text-plum-muted">
-                    or <span className="text-prune font-semibold">browse files</span>{' '}
-                    · MP4, MOV, MKV, AVI, WebM · max 500 MB
+                    {warming
+                      ? 'Please wait a moment while the server starts up'
+                      : <> or <span className="text-prune font-semibold">browse files</span>{' '}· MP4, MOV, MKV, AVI, WebM · max 500 MB </>
+                    }
                   </p>
                 </div>
               </motion.div>
@@ -205,10 +240,12 @@ export default function UploadPage() {
                 type="submit"
                 size="lg"
                 className="w-full"
-                disabled={loading || !url.trim()}
+                disabled={loading || !url.trim() || warming}
               >
                 {loading
                   ? <><Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />Processing…</>
+                  : warming
+                  ? <><Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />Connecting to server…</>
                   : <><Zap className="w-4 h-4 mr-2" aria-hidden />Analyze Video</>
                 }
               </Button>
