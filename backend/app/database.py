@@ -43,15 +43,24 @@ _is_postgres = _db_url.startswith("postgresql") or _db_url.startswith("postgres"
 
 _engine_kwargs: dict = {"echo": settings.DEBUG}
 
+# Detect pgBouncer transaction-mode pooler (Supabase port 6543).
+# NullPool is required: pgBouncer transaction mode doesn't support
+# named prepared statements or session-level state across transactions.
+_is_pgbouncer = ":6543/" in _db_url or ":6543?" in _db_url
+
 if _is_sqlite:
     _engine_kwargs["connect_args"] = {"check_same_thread": False}
+elif _is_pgbouncer:
+    from sqlalchemy.pool import NullPool
+    _engine_kwargs["poolclass"] = NullPool
+    _engine_kwargs["pool_pre_ping"] = True
 elif _is_postgres:
-    # Connection pool tuned for a long-running web server + Celery worker
+    # Direct connection pool (IPv6 or Session Pooler port 5432)
     _engine_kwargs.update({
         "pool_size": 5,
         "max_overflow": 10,
-        "pool_pre_ping": True,      # detect stale connections
-        "pool_recycle": 1800,       # recycle every 30 min (avoids idle timeouts)
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
     })
 
 engine = create_engine(_db_url, **_engine_kwargs)
