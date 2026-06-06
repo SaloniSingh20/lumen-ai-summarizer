@@ -47,10 +47,21 @@ def _configure_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    formatter = structlog.stdlib.ProcessorFormatter(
-        foreign_pre_chain=shared_processors,
-        processor=renderer,
-    )
+    # structlog >= 21.2 uses processors= (plural); fall back to processor= for older versions.
+    try:
+        formatter = structlog.stdlib.ProcessorFormatter(
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                renderer,
+            ],
+            foreign_pre_chain=shared_processors,
+        )
+    except TypeError:
+        formatter = structlog.stdlib.ProcessorFormatter(  # type: ignore[call-arg]
+            processor=renderer,
+            foreign_pre_chain=shared_processors,
+        )
+
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
 

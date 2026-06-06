@@ -1,0 +1,50 @@
+# CI test dependencies — intentionally minimal.
+# Versions match requirements.render.txt so behavior is consistent.
+# Heavy AI/GPU deps (google-generativeai, groq, faiss, fastembed) are
+# excluded; AI_PROVIDER=mock is used in CI so no real model is needed.
+
+# Core API
+fastapi==0.111.0
+uvicorn==0.30.1
+pydantic==2.7.1
+pydantic-settings==2.3.1
+
+# HTTP client (used by auth.py for Supabase calls)
+httpx==0.27.0
+
+# File handling
+python-multipart==0.0.9
+aiofiles==23.2.1
+
+# Database
+sqlalchemy==2.0.30
+
+# Task queue
+celery==5.4.0
+redis==5.0.4
+
+# Rate limiting
+slowapi==0.1.9
+limits==3.13.0
+
+# Numeric (constrained to stay below 2.0 for numpy C-API compatibility)
+numpy>=1.24.0,<2.0.0
+
+# Video processing
+opencv-python-headless==4.10.0.84
+youtube-transcript-api>=0.6.0
+
+# PDF export
+reportlab==4.2.0
+Pillow==10.3.0
+
+# Auth
+PyJWT==2.9.0
+
+# Error tracking / logging (no extras needed in CI)
+sentry-sdk==2.7.1
+structlog==24.2.0
+
+# Testing
+pytest>=8.0.0,<9.0.0
+pytest-asyncio>=0.21.0,<1.0.0
