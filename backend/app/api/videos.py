@@ -92,12 +92,12 @@ def search_video(
         )
         results = [
             SearchResult(
-                type=r[“type”],
-                text=r[“text”],
-                start=r[“start”],
-                end=r[“end”],
-                score=r[“score”],
-                label=r.get(“label”),
+                type=r["type"],
+                text=r["text"],
+                start=r["start"],
+                end=r["end"],
+                score=r["score"],
+                label=r.get("label"),
             )
             for r in raw_results
         ]
@@ -110,13 +110,13 @@ def search_video(
         for seg in segments:
             if q_lower in seg.text.lower():
                 results.append(SearchResult(
-                    type=”transcript”, text=seg.text,
+                    type="transcript", text=seg.text,
                     start=seg.start, end=seg.end, score=1.0,
                 ))
         for sc in scenes:
             if sc.description and q_lower in sc.description.lower():
                 results.append(SearchResult(
-                    type=”scene”, text=sc.description,
+                    type="scene", text=sc.description,
                     start=sc.start_time, end=sc.end_time,
                     score=0.8, label=sc.scene_label,
                 ))
@@ -258,5 +258,4 @@ def stream_video(
         media_type="video/mp4",
         headers={"Accept-Ranges": "bytes"},
     )
-
 
