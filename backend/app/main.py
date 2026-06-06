@@ -169,7 +169,7 @@ async def generic_error_handler(request: Request, exc: Exception):
         extra_headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=500,
-        content={"detail": f"{type(exc).__name__}: {str(exc)[:300]}"},
+        content={"detail": "An internal error occurred"},
         headers=extra_headers,
     )
 
