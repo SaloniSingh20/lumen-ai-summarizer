@@ -173,9 +173,16 @@ async def add_response_time(request: Request, call_next):
 
 
 # ── CORS ─────────────────────────────────────────────────────────────────
+# allow_credentials must be False when allow_origins=["*"]; browsers reject
+# the combination of wildcard origin + credentials. We use JWT in the
+# Authorization header (not cookies) so credentials=False is correct.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://lumen-ai-summarizer.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
