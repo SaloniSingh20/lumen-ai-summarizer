@@ -20,6 +20,7 @@ import AnimatedCounter from '@/components/AnimatedCounter'
 import LumenChat from '@/components/LumenChat'
 import AuthedImage from '@/components/AuthedImage'
 import { api, tokenStore, type VideoData, type AnalyticsData, type SearchResult } from '@/lib/api'
+import { getAccessToken } from '@/lib/supabase'
 import { formatTime, formatDuration } from '@/lib/utils'
 import { MOCK_NOTES, MOCK_SCENES, MOCK_ANALYTICS } from '@/lib/mockData'
 
@@ -44,6 +45,7 @@ export default function ResultsPage() {
   const [results,   setResults]   = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [activeTab, setActiveTab] = useState('notes')
+  const [pdfLoading, setPdfLoading] = useState(false)
 
   useEffect(() => {
     if (!videoId) return
@@ -76,17 +78,27 @@ export default function ResultsPage() {
   }
 
   const downloadPdf = async () => {
-    if (!videoId) return
-    const token = tokenStore.get()
-    const res = await fetch(`/api/videos/${videoId}/export/pdf`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    if (!res.ok) return
-    const blob = await res.blob()
-    const url  = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `lumen-notes-${videoId.slice(0,8)}.pdf`; a.click()
-    URL.revokeObjectURL(url)
+    if (!videoId || pdfLoading) return
+    setPdfLoading(true)
+    try {
+      const token = (await getAccessToken()) ?? tokenStore.get()
+      const res = await fetch(api.exportPdfUrl(videoId), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? `Export failed (${res.status})`)
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `lumen-notes-${videoId.slice(0, 8)}.pdf`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download PDF')
+    } finally {
+      setPdfLoading(false)
+    }
   }
 
   // Use real data when available, fall back to mock for demo
@@ -145,8 +157,11 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          <Button variant="outline" size="sm" onClick={downloadPdf} aria-label="Export PDF">
-            <Download className="w-3.5 h-3.5 mr-1.5" aria-hidden />PDF
+          <Button variant="outline" size="sm" onClick={downloadPdf} disabled={pdfLoading} aria-label="Export PDF">
+            {pdfLoading
+              ? <span className="w-3.5 h-3.5 mr-1.5 rounded-full border-2 border-prune/30 border-t-prune animate-spin inline-block" />
+              : <Download className="w-3.5 h-3.5 mr-1.5" aria-hidden />}
+            PDF
           </Button>
         </div>
       </header>
@@ -436,9 +451,11 @@ export default function ResultsPage() {
                 <p className="text-sm text-plum-muted mb-6 max-w-sm mx-auto leading-relaxed">
                   Download a beautifully formatted PDF with the title, TL;DR, all notes, key concepts, takeaways, and scene descriptions.
                 </p>
-                <Button size="lg" onClick={downloadPdf} className="gap-2">
-                  <Download className="w-4 h-4" aria-hidden />
-                  Download PDF
+                <Button size="lg" onClick={downloadPdf} disabled={pdfLoading} className="gap-2">
+                  {pdfLoading
+                    ? <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin inline-block" />
+                    : <Download className="w-4 h-4" aria-hidden />}
+                  {pdfLoading ? 'Generating…' : 'Download PDF'}
                 </Button>
                 <p className="text-xs text-plum-muted mt-4">Formatted with Fraunces serif headings · ready to share</p>
               </div>
