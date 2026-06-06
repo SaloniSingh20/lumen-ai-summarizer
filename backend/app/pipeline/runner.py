@@ -186,7 +186,7 @@ def run_pipeline(job_id: str, video_id: str, db: Session):
         db.add(notes)
         db.commit()
 
-        # --- Stage 9: Build FAISS index ---
+        # --- Stage 9: Build FAISS index (best-effort — skip on OOM) ---
         update_job(db, job_id, "Building search index", 92)
         db_scenes_data = [
             {
@@ -198,16 +198,19 @@ def run_pipeline(job_id: str, video_id: str, db: Session):
             }
             for s in db_scenes
         ]
-        index_path, meta_path = build_faiss_index(
-            transcript_segments_data,
-            db_scenes_data,
-            provider,
-            faiss_dir,
-            video_id,
-        )
-        notes.faiss_index_path = index_path
-        notes.faiss_metadata_path = meta_path
-        db.commit()
+        try:
+            index_path, meta_path = build_faiss_index(
+                transcript_segments_data,
+                db_scenes_data,
+                provider,
+                faiss_dir,
+                video_id,
+            )
+            notes.faiss_index_path = index_path
+            notes.faiss_metadata_path = meta_path
+            db.commit()
+        except Exception as emb_err:
+            logger.warning(f"FAISS index skipped (memory/model error): {emb_err}")
 
         # --- Stage 10: Finalize ---
         update_job(db, job_id, "Complete", 100)

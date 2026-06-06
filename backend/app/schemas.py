@@ -1,6 +1,11 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
+
+
+def _str(v):
+    """Coerce UUID / any object to str."""
+    return str(v) if v is not None else v
 
 
 class JobCreate(BaseModel):
@@ -14,6 +19,10 @@ class JobStatus(BaseModel):
     progress: float
     error: Optional[str] = None
     created_at: Optional[datetime] = None
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def _id(cls, v): return _str(v)
 
     class Config:
         from_attributes = True
@@ -78,6 +87,10 @@ class VideoOut(BaseModel):
     scenes: List[SceneOut] = []
     notes: Optional[NotesOut] = None
 
+    @field_validator('id', 'job_id', mode='before')
+    @classmethod
+    def _ids(cls, v): return _str(v)
+
     class Config:
         from_attributes = True
 
@@ -121,6 +134,10 @@ class UploadResponse(BaseModel):
     job_id: str
     video_id: str
     message: str
+
+    @field_validator('job_id', 'video_id', mode='before')
+    @classmethod
+    def _ids(cls, v): return _str(v)
 
 
 class AnalyticsOut(BaseModel):
