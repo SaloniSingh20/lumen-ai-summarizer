@@ -130,7 +130,8 @@ def _format_context(segments: List[dict]) -> str:
     lines = []
     for seg in segments:
         t = seg.get("type", "")
-        text = seg.get("text", "")
+        # Scene segments store content in 'description'; transcript segments use 'text'
+        text = seg.get("text") or seg.get("description", "")
         start = seg.get("start", 0)
         end = seg.get("end", 0)
         label = seg.get("label", "")

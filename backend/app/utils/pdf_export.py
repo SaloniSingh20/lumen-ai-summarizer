@@ -1,6 +1,7 @@
 """Generate styled PDF from notes using ReportLab."""
 import io
 from typing import Optional
+from xml.sax.saxutils import escape as _xe
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -85,13 +86,13 @@ def generate_pdf(notes_data: dict, video_title: str = "") -> bytes:
     story = []
 
     title = notes_data.get("title") or video_title or "Video Notes"
-    story.append(Paragraph(title, title_style))
+    story.append(Paragraph(_xe(title), title_style))
 
     meta_parts = []
     if notes_data.get("content_type"):
-        meta_parts.append(f"Type: {notes_data['content_type'].title()}")
+        meta_parts.append(f"Type: {_xe(notes_data['content_type'].title())}")
     if notes_data.get("language_detected"):
-        meta_parts.append(f"Language: {notes_data['language_detected'].upper()}")
+        meta_parts.append(f"Language: {_xe(notes_data['language_detected'].upper())}")
     if meta_parts:
         story.append(Paragraph("  ·  ".join(meta_parts), muted_style))
 
@@ -100,13 +101,13 @@ def generate_pdf(notes_data: dict, video_title: str = "") -> bytes:
     # TL;DR
     if notes_data.get("tldr"):
         story.append(Paragraph("TL;DR", h1_style))
-        story.append(Paragraph(notes_data["tldr"], body_style))
+        story.append(Paragraph(_xe(notes_data["tldr"]), body_style))
         story.append(Spacer(1, 8))
 
     # Main topics
     if notes_data.get("main_topics"):
         story.append(Paragraph("Main Topics", h1_style))
-        items = [ListItem(Paragraph(t, bullet_style), bulletColor=ACCENT) for t in notes_data["main_topics"]]
+        items = [ListItem(Paragraph(_xe(t), bullet_style), bulletColor=ACCENT) for t in notes_data["main_topics"]]
         story.append(ListFlowable(items, bulletType="bullet", start="•"))
         story.append(Spacer(1, 8))
 
@@ -121,8 +122,8 @@ def generate_pdf(notes_data: dict, video_title: str = "") -> bytes:
         story.append(Paragraph("Key Concepts", h1_style))
         for kc in notes_data["key_concepts"]:
             if isinstance(kc, dict):
-                concept = kc.get("concept", "")
-                explanation = kc.get("explanation", "")
+                concept = _xe(kc.get("concept", ""))
+                explanation = _xe(kc.get("explanation", ""))
                 story.append(Paragraph(f"<b>{concept}</b>", bullet_style))
                 story.append(Paragraph(explanation, muted_style))
                 story.append(Spacer(1, 4))
@@ -130,14 +131,14 @@ def generate_pdf(notes_data: dict, video_title: str = "") -> bytes:
     # Key takeaways
     if notes_data.get("key_takeaways"):
         story.append(Paragraph("Key Takeaways", h1_style))
-        items = [ListItem(Paragraph(t, bullet_style), bulletColor=ACCENT) for t in notes_data["key_takeaways"]]
+        items = [ListItem(Paragraph(_xe(t), bullet_style), bulletColor=ACCENT) for t in notes_data["key_takeaways"]]
         story.append(ListFlowable(items, bulletType="bullet", start="•"))
         story.append(Spacer(1, 8))
 
     # Visual summary
     if notes_data.get("visual_summary"):
         story.append(Paragraph("Visual Summary", h1_style))
-        story.append(Paragraph(notes_data["visual_summary"], body_style))
+        story.append(Paragraph(_xe(notes_data["visual_summary"]), body_style))
         story.append(Spacer(1, 8))
 
     # Scenes
@@ -146,8 +147,8 @@ def generate_pdf(notes_data: dict, video_title: str = "") -> bytes:
         story.append(Paragraph("Scenes", h1_style))
         for s in scenes:
             if isinstance(s, dict):
-                label = s.get("scene_label", "Scene")
-                desc = s.get("description", "")
+                label = _xe(s.get("scene_label", "Scene"))
+                desc = _xe(s.get("description", ""))
                 story.append(Paragraph(f"<b>{label}</b>", h2_style))
                 if desc:
                     story.append(Paragraph(desc, muted_style))
@@ -157,7 +158,7 @@ def generate_pdf(notes_data: dict, video_title: str = "") -> bytes:
         story.append(Spacer(1, 10))
         story.append(HRFlowable(width="100%", thickness=0.5, color=MUTED))
         story.append(Paragraph("Confidence Notes", muted_style))
-        story.append(Paragraph(notes_data["confidence_notes"], muted_style))
+        story.append(Paragraph(_xe(notes_data["confidence_notes"]), muted_style))
 
     # Footer
     story.append(Spacer(1, 20))
@@ -173,26 +174,25 @@ def _render_markdown_lite(text: str, story: list, body_style, h2_style, bullet_s
     for line in text.split("\n"):
         line = line.rstrip()
         if line.startswith("## "):
-            story.append(Paragraph(line[3:], h2_style))
+            story.append(Paragraph(_xe(line[3:]), h2_style))
         elif line.startswith("# "):
-            story.append(Paragraph(line[2:], h2_style))
+            story.append(Paragraph(_xe(line[2:]), h2_style))
         elif line.startswith("### "):
-            story.append(Paragraph(f"<b>{line[4:]}</b>", bullet_style))
+            story.append(Paragraph(f"<b>{_xe(line[4:])}</b>", bullet_style))
         elif line.startswith("- ") or line.startswith("* "):
-            story.append(Paragraph(f"• {line[2:]}", bullet_style))
+            story.append(Paragraph(f"• {_xe(line[2:])}", bullet_style))
         elif line.startswith("  - ") or line.startswith("  * "):
-            story.append(Paragraph(f"  ◦ {line[4:]}", bullet_style))
+            story.append(Paragraph(f"  ◦ {_xe(line[4:])}", bullet_style))
         elif line.strip() == "":
             story.append(Spacer(1, 4))
         else:
-            # Bold inline
-            line = _process_inline(line)
-            story.append(Paragraph(line, body_style))
+            story.append(Paragraph(_process_inline(line), body_style))
 
 
 def _process_inline(text: str) -> str:
-    """Convert **bold** and `code` to ReportLab XML."""
+    """Escape XML entities then convert **bold** and `code` to ReportLab markup."""
     import re
+    text = _xe(text)  # escape & < > first so they don't break ReportLab's XML parser
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
     text = re.sub(r"`(.+?)`", r"<font name='Courier'>\1</font>", text)

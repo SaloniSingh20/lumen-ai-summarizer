@@ -170,6 +170,10 @@ def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
             raw = transcript.fetch()
             lang = transcript.language_code
 
+        # Final fallback: yt-dlp subtitle download (bypasses transcript API blocks)
+        if not raw:
+            return _fetch_subtitles_ytdlp(video_id)
+
         segments = []
         for item in raw:
             # Support both dict (v0.x) and object (newer API) responses
@@ -191,6 +195,64 @@ def fetch_youtube_transcript(url: str) -> tuple[list[dict], str]:
         raise
     except Exception as e:
         raise RuntimeError(f"YouTube captions unavailable for this video: {e}")
+
+
+def _fetch_subtitles_ytdlp(video_id: str) -> tuple[list[dict], str]:
+    """
+    Last-resort: use yt-dlp --skip-download --write-auto-subs to get VTT captions.
+    Works for videos where youtube-transcript-api is blocked but yt-dlp auth strategies work.
+    """
+    import tempfile, glob, re as _re
+    tmpdir = tempfile.mkdtemp()
+    cmd = [
+        "yt-dlp",
+        "--write-auto-subs", "--skip-download",
+        "--sub-format", "vtt", "--sub-lang", "en.*",
+        "--no-check-certificates", "--force-ipv4", "--no-warnings",
+        "--extractor-args", "youtube:player_client=tv_embedded",
+        "-o", os.path.join(tmpdir, "%(id)s.%(ext)s"),
+        f"https://www.youtube.com/watch?v={video_id}",
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except Exception:
+        raise RuntimeError("yt-dlp subtitle download failed")
+
+    vtt_files = glob.glob(os.path.join(tmpdir, "*.vtt"))
+    if not vtt_files:
+        raise RuntimeError("No subtitle files found")
+
+    segments: list[dict] = []
+    with open(vtt_files[0], encoding="utf-8") as f:
+        content = f.read()
+
+    for block in _re.split(r"\n{2,}", content):
+        lines = block.strip().splitlines()
+        for i, line in enumerate(lines):
+            m = _re.match(
+                r"(\d+:\d{2}:\d{2}[\.,]\d+|\d+:\d{2}[\.,]\d+)\s*-->\s*(\d+:\d{2}:\d{2}[\.,]\d+|\d+:\d{2}[\.,]\d+)",
+                line,
+            )
+            if m:
+                start = _vtt_time(m.group(1))
+                end = _vtt_time(m.group(2))
+                raw_text = " ".join(lines[i + 1:])
+                text = _re.sub(r"<[^>]+>", "", raw_text).strip()
+                if text:
+                    segments.append({"start": start, "end": end, "text": text})
+                break
+
+    if not segments:
+        raise RuntimeError("VTT file had no usable captions")
+    return segments, "en"
+
+
+def _vtt_time(s: str) -> float:
+    s = s.replace(",", ".")
+    parts = s.split(":")
+    if len(parts) == 3:
+        return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+    return float(parts[0]) * 60 + float(parts[1])
 
 
 def get_filename_from_url(url: str) -> str:
