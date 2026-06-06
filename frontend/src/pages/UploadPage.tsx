@@ -37,28 +37,44 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState('')
   const [warming, setWarming] = useState(true)
+  const [warmMsg, setWarmMsg] = useState('Connecting to server…')
 
-  // Ping backend on mount so Render free-tier wakes up before user hits Submit
+  // Poll backend until it responds — Render free tier can take 50 s to wake
   useEffect(() => {
-    api.health().catch(() => {}).finally(() => setWarming(false))
+    let cancelled = false
+    const wake = async () => {
+      for (let i = 0; i < 18; i++) {          // up to ~90 s
+        if (cancelled) return
+        try {
+          await api.health()
+          if (!cancelled) setWarming(false)
+          return
+        } catch {
+          if (!cancelled) setWarmMsg(`Server starting… (${(i + 1) * 5}s)`)
+          await new Promise(r => setTimeout(r, 5000))
+        }
+      }
+      if (!cancelled) setWarming(false)        // give up after 90 s
+    }
+    wake()
+    return () => { cancelled = true }
   }, [])
 
   const handleFile = useCallback(async (file: File) => {
     setLoading(true); setError('')
-    // Retry once on "Failed to fetch" (Render cold start can cause a transient failure)
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const { job_id, video_id } = await api.uploadFile(file)
         navigate(`/processing/${job_id}/${video_id}`)
         return
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Upload failed'
-        if (attempt === 0 && msg === 'Failed to fetch') {
-          await new Promise(r => setTimeout(r, 4000)) // wait 4s for backend to wake
+        if (msg === 'Failed to fetch' && attempt < 2) {
+          await new Promise(r => setTimeout(r, 10000))  // 10 s — Render wake takes ~50 s
           continue
         }
         setError(msg === 'Failed to fetch'
-          ? 'Could not reach the server. Please wait a few seconds and try again.'
+          ? 'Server is still starting up. Please wait 30 seconds then try again.'
           : msg)
         setLoading(false)
         return
@@ -74,27 +90,38 @@ export default function UploadPage() {
     onDropRejected:  ()    => setError('Invalid file type. Please drop a video file (MP4, MOV, MKV, AVI, WebM).'),
   })
 
+  // Strip YouTube tracking params that cause yt-dlp to require auth
+  const cleanYouTubeUrl = (raw: string): string => {
+    try {
+      const u = new URL(raw)
+      for (const p of ['pp', 'si', 'feature', 'list', 'index', 'ab_channel']) u.searchParams.delete(p)
+      return u.toString()
+    } catch { return raw }
+  }
+
   const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!url.trim()) return
+    const cleanUrl = cleanYouTubeUrl(url.trim())
     setLoading(true); setError('')
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const { job_id, video_id } = await api.submitUrl(url.trim())
+        const { job_id, video_id } = await api.submitUrl(cleanUrl)
         navigate(`/processing/${job_id}/${video_id}`)
         return
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to process URL'
-        if (attempt === 0 && msg === 'Failed to fetch') {
-          await new Promise(r => setTimeout(r, 4000))
+        if (msg === 'Failed to fetch' && attempt < 2) {
+          await new Promise(r => setTimeout(r, 10000))
           continue
         }
         let friendly = msg
-        if (msg === 'Failed to fetch') friendly = 'Could not reach the server. Please wait a few seconds and try again.'
-        else if (msg.toLowerCase().includes('account') || msg.toLowerCase().includes('login') || msg.toLowerCase().includes('sign in'))
-          friendly = 'This video is private or age-restricted. Try a public YouTube video URL (youtube.com/watch?v=...)'
-        else if (msg.toLowerCase().includes('shorts'))
-          friendly = 'YouTube Shorts require an account. Paste a regular YouTube URL: youtube.com/watch?v=...'
+        if (msg === 'Failed to fetch')
+          friendly = 'Server is still starting up. Please wait 30 seconds then try again.'
+        else if (msg.toLowerCase().includes('account') || msg.toLowerCase().includes('login') || msg.toLowerCase().includes('sign in') || msg.toLowerCase().includes('age'))
+          friendly = 'This video requires sign-in or is age-restricted. Use a fully public video — paste just the youtube.com/watch?v=... URL without extra parameters.'
+        else if (msg.toLowerCase().includes('private'))
+          friendly = 'This video is private. Use a public YouTube video.'
         setError(friendly)
         setLoading(false)
         return
@@ -211,11 +238,11 @@ export default function UploadPage() {
                 }
                 <div>
                   <p className="text-base font-semibold text-plum mb-1">
-                    {loading ? 'Uploading…' : warming ? 'Connecting to server…' : isDragActive ? 'Drop to analyze' : 'Drop your video here'}
+                    {loading ? 'Uploading…' : warming ? warmMsg : isDragActive ? 'Drop to analyze' : 'Drop your video here'}
                   </p>
                   <p className="text-sm text-plum-muted">
                     {warming
-                      ? 'Please wait a moment while the server starts up'
+                      ? 'Free-tier server wakes up in ~30s — please wait'
                       : <> or <span className="text-prune font-semibold">browse files</span>{' '}· MP4, MOV, MKV, AVI, WebM · max 500 MB </>
                     }
                   </p>
@@ -245,7 +272,7 @@ export default function UploadPage() {
                 {loading
                   ? <><Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />Processing…</>
                   : warming
-                  ? <><Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />Connecting to server…</>
+                  ? <><Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />{warmMsg}</>
                   : <><Zap className="w-4 h-4 mr-2" aria-hidden />Analyze Video</>
                 }
               </Button>
