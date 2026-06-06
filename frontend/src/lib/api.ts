@@ -9,7 +9,9 @@
  */
 import { getAccessToken, supabase } from './supabase'
 
-const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`
+// Local dev: VITE_API_URL is empty → BASE='/api', Vite proxy strips /api before forwarding to :8000
+// Production: VITE_API_URL is set → BASE=external URL, backend routes served directly (no /api prefix)
+const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 // --------------------------------------------------------------------------
 // Legacy token storage (used when Supabase is not configured)
