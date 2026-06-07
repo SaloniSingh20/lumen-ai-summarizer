@@ -45,6 +45,7 @@ class MockProvider(AIProvider):
         context_segments: List[dict],
         history: List[dict],
         video_title: str = "",
+        video_summary: str = "",
     ) -> str:
         return "Mock answer."
 

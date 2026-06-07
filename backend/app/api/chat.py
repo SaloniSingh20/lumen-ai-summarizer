@@ -17,6 +17,34 @@ from ..utils.time_parser import parse_time_range, format_time
 router = APIRouter(prefix="/videos", tags=["lumen"])
 settings = get_settings()
 
+def _build_video_summary(notes: Notes) -> str:
+    """
+    Build a compact always-on summary of the whole video (topics, visuals,
+    scenes, takeaways) so Lumen always has something concrete to draw on —
+    even when retrieval doesn't surface a segment matching the question.
+    """
+    parts = []
+    if notes.tldr:
+        parts.append(f"Overview: {notes.tldr}")
+    if notes.main_topics:
+        parts.append("Main topics: " + ", ".join(str(t) for t in notes.main_topics))
+    if notes.visual_summary:
+        parts.append(f"Visual summary: {notes.visual_summary}")
+    scenes = notes.scenes_summary or []
+    scene_lines = []
+    for s in scenes[:12]:
+        if isinstance(s, dict):
+            label = s.get("scene_label", "Scene")
+            desc = s.get("description", "")
+            if desc:
+                scene_lines.append(f"- {label}: {desc}")
+    if scene_lines:
+        parts.append("Scenes:\n" + "\n".join(scene_lines))
+    if notes.key_takeaways:
+        parts.append("Key takeaways: " + "; ".join(str(t) for t in notes.key_takeaways))
+    return "\n\n".join(parts) if parts else "(no summary available)"
+
+
 QUICK_SUGGESTIONS = [
     "Summarize the intro",
     "What are the main topics?",
@@ -80,21 +108,47 @@ def lumen_chat(
         if context_segments:
             seek_to = context_segments[0].get("start")
     else:
-        # FAISS unavailable — fall back to keyword search over transcript for context
+        # FAISS unavailable — fall back to keyword search over transcript AND
+        # scene/visual descriptions, so visual questions still retrieve context.
         all_segments = db.query(TranscriptSegment).filter(TranscriptSegment.video_id == video.id).all()
+        all_scenes = db.query(Scene).filter(Scene.video_id == video.id).all()
         msg_lower = message.lower()
+        keywords = [w for w in msg_lower.split() if len(w) > 3]
+
         for seg in all_segments:
-            if any(word in seg.text.lower() for word in msg_lower.split() if len(word) > 3):
-                context_segments.append({"type": "transcript", "start": seg.start, "end": seg.end, "text": seg.text})
+            if any(w in seg.text.lower() for w in keywords):
+                context_segments.append({"type": "transcript", "start": seg.start, "end": seg.end, "text": seg.text, "label": "Transcript"})
                 if seek_to is None:
                     seek_to = seg.start
+
+        for sc in all_scenes:
+            desc = sc.description or ""
+            label = sc.scene_label or f"Scene {sc.scene_number}"
+            if desc and (any(w in desc.lower() for w in keywords) or any(w in label.lower() for w in keywords)):
+                context_segments.append({"type": "scene", "start": sc.start_time, "end": sc.end_time, "text": desc, "label": label})
+                if seek_to is None:
+                    seek_to = sc.start_time
+
+        # Vague queries ("what is shown visually?", "what's the view?") often
+        # share no keywords with scene descriptions — if nothing matched and
+        # the question seems visual, surface the scene descriptions directly.
+        if not context_segments and any(w in msg_lower for w in ("visual", "view", "see", "show", "look", "scene", "screen", "image", "picture")):
+            for sc in all_scenes:
+                if sc.description:
+                    context_segments.append({"type": "scene", "start": sc.start_time, "end": sc.end_time, "text": sc.description, "label": sc.scene_label or f"Scene {sc.scene_number}"})
+                    if seek_to is None:
+                        seek_to = sc.start_time
+
         context_segments = context_segments[:settings.FAISS_TOP_K]
+
+    video_summary = _build_video_summary(notes)
 
     answer = provider.answer_question(
         question=message,
         context_segments=context_segments,
         history=history,
         video_title=notes.title or video.filename or "",
+        video_summary=video_summary,
     )
 
     sources = []

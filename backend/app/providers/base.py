@@ -52,9 +52,12 @@ class AIProvider(ABC):
         context_segments: List[dict],
         history: List[dict],
         video_title: str = "",
+        video_summary: str = "",
     ) -> str:
         """
-        Answer a question grounded only in provided context segments.
+        Answer a question grounded in the retrieved context segments AND the
+        overall video summary (so the assistant always has something useful
+        to draw on, even when retrieval misses the exact detail asked).
         Used by Lumen Q&A.
         """
         ...

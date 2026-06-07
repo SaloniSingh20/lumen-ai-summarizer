@@ -130,12 +130,14 @@ class GroqProvider(AIProvider):
         context_segments: List[dict],
         history: List[dict],
         video_title: str = "",
+        video_summary: str = "",
     ) -> str:
         context      = _format_context(context_segments)
         history_text = _format_history(history)
         system       = LUMEN_SYSTEM_PROMPT.format(video_title=video_title)
         user_msg     = LUMEN_USER_PROMPT.format(
-            context=context, history=history_text, question=question
+            summary=video_summary or "(no summary available)",
+            context=context, history=history_text, question=question,
         )
         response = self._client.chat.completions.create(
             model=_LLM_MODEL,
