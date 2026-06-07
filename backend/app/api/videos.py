@@ -7,6 +7,7 @@ Every endpoint uses get_owned_video / get_owned_job so that:
   - Public static mounts are REMOVED; files served only here, after auth.
 """
 import os
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response, FileResponse
 from sqlalchemy.orm import Session
@@ -26,6 +27,7 @@ from .. import cache
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[VideoOut])
@@ -177,6 +179,10 @@ def export_pdf(
         "confidence_notes": notes.confidence_notes,
     }
     pdf_bytes = generate_pdf(notes_dict, video.filename)
+    if len(pdf_bytes) < 1024:
+        logger.error(f"Generated PDF for video {video.id} is suspiciously small ({len(pdf_bytes)} bytes) — refusing to serve a corrupt file")
+        raise HTTPException(500, "PDF generation produced an invalid file. Please try again.")
+
     safe_title = (notes.title or video.filename or "notes").replace("/", "_")[:50]
     return Response(
         content=pdf_bytes,

@@ -1,11 +1,29 @@
 """Generate styled PDF from notes using ReportLab."""
 import io
+import re as _re
 from typing import Optional
 from xml.sax.saxutils import escape as _escape
 
+# Control characters (other than \n, \t, \r) and lone surrogates are invalid in
+# XML and can corrupt ReportLab's internal content-stream encoding, producing a
+# PDF the browser reports as "Failed to load PDF document". AI-generated text
+# (and scraped/transcribed content) occasionally contains these — strip them
+# before they ever reach Paragraph/XML parsing.
+_CONTROL_CHARS_RE = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_text(s: str) -> str:
+    s = _CONTROL_CHARS_RE.sub("", s)
+    if any(0xD800 <= ord(ch) <= 0xDFFF for ch in s):
+        s = "".join(ch for ch in s if not (0xD800 <= ord(ch) <= 0xDFFF))
+    return s
+
+
 def _xe(v) -> str:
-    """Escape XML special chars; accepts any type (None → empty string)."""
-    return _escape(str(v) if v is not None else "")
+    """Sanitize unsafe characters and escape XML special chars (None → "")."""
+    return _escape(_sanitize_text(str(v) if v is not None else ""))
+
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
