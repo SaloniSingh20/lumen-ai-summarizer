@@ -31,10 +31,15 @@ STAGES = [
 ]
 
 
-def run_transcript_only_pipeline(job_id: str, video_id: str, db: Session):
+def run_transcript_only_pipeline(job_id: str, video_id: str, db: Session, partial: bool = False):
     """
     Lightweight pipeline for YouTube videos where yt-dlp download failed.
     Transcript segments are already in the DB; this stage just generates notes.
+
+    `partial=True` means the "transcript" segments are actually synthesized
+    from video metadata (title/description/chapters or scraped page tags)
+    because no real captions were reachable — a notice is appended to
+    confidence_notes so the user knows the summary is best-effort.
     """
     provider = get_provider()
     try:
@@ -57,6 +62,16 @@ def run_transcript_only_pipeline(job_id: str, video_id: str, db: Session):
         ts_objs = [TSObj(start=s["start"], end=s["end"], text=s["text"]) for s in transcript_segments_data]
         notes_data = provider.generate_notes(ts_objs, [], has_audio=True, language=detected_language)
 
+        confidence_notes = notes_data.get("confidence_notes")
+        if partial:
+            notice = (
+                "⚠️ Limited data: YouTube blocked full transcript/caption access for this video "
+                "from our server, so this summary is generated from the video's title, description, "
+                "and chapter list only — not the full spoken content. For a complete analysis, use "
+                "the 'Upload File' option to upload the video directly."
+            )
+            confidence_notes = f"{notice}\n\n{confidence_notes}" if confidence_notes else notice
+
         notes = Notes(
             video_id=video_id,
             content_type=notes_data.get("content_type"),
@@ -70,7 +85,7 @@ def run_transcript_only_pipeline(job_id: str, video_id: str, db: Session):
             key_takeaways=notes_data.get("key_takeaways", []),
             visual_summary=notes_data.get("visual_summary"),
             scenes_summary=notes_data.get("scenes", []),
-            confidence_notes=notes_data.get("confidence_notes"),
+            confidence_notes=confidence_notes,
         )
         db.add(notes)
         db.commit()

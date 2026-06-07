@@ -263,6 +263,168 @@ def _vtt_time(s: str) -> float:
     return float(parts[0]) * 60 + float(parts[1])
 
 
+def fetch_youtube_content(url: str) -> dict:
+    """
+    Best-effort YouTube content fetcher with a 3-tier fallback chain:
+      1. Captions/transcript (youtube-transcript-api / yt-dlp subtitles)
+      2. YouTube Data API v3 metadata (title, description, chapters from description)
+      3. Scrape og:title / og:description from the watch page (UA-spoofed)
+
+    Always returns whatever could be gathered — raises RuntimeError only when
+    NOTHING at all (not even a title) could be retrieved, since at that point
+    there is no basis for any summary.
+    """
+    import re
+    yt_match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
+    if not yt_match:
+        raise RuntimeError("Not a valid YouTube URL")
+    video_id = yt_match.group(1)
+
+    # ── Tier 1: full transcript/captions ────────────────────────────────────
+    try:
+        segments, language = fetch_youtube_transcript(url)
+        if segments:
+            return {
+                "segments": segments,
+                "language": language,
+                "title": None,
+                "source": "transcript",
+                "partial": False,
+            }
+    except Exception:
+        pass
+
+    # ── Tier 2: YouTube Data API v3 (title, description, chapters) ─────────
+    meta = _fetch_youtube_api_metadata(video_id)
+    source = "youtube_api"
+
+    # ── Tier 3: scrape og:title / og:description from the watch page ───────
+    if not meta:
+        meta = _scrape_youtube_page_metadata(video_id)
+        source = "scrape"
+
+    if not meta or not (meta.get("title") or meta.get("description")):
+        raise RuntimeError(
+            "No transcript, captions, or video metadata could be retrieved for this video."
+        )
+
+    return {
+        "segments": _build_synthetic_segments(meta),
+        "language": "en",
+        "title": meta.get("title") or None,
+        "source": source,
+        "partial": True,
+    }
+
+
+def _fetch_youtube_api_metadata(video_id: str) -> "dict | None":
+    """Fetch title/description/chapters via the YouTube Data API v3 (requires YOUTUBE_API_KEY)."""
+    from ..config import get_settings
+    api_key = get_settings().YOUTUBE_API_KEY
+    if not api_key:
+        return None
+    try:
+        import httpx
+        resp = httpx.get(
+            "https://www.googleapis.com/youtube/v3/videos",
+            params={"part": "snippet,contentDetails", "id": video_id, "key": api_key},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items") or []
+        if not items:
+            return None
+        snippet = items[0].get("snippet", {})
+        title = (snippet.get("title") or "").strip()
+        description = (snippet.get("description") or "").strip()
+        if not title and not description:
+            return None
+        return {
+            "title": title,
+            "description": description,
+            "chapters": _extract_chapters_from_description(description),
+        }
+    except Exception:
+        return None
+
+
+def _scrape_youtube_page_metadata(video_id: str) -> "dict | None":
+    """Last-resort: scrape og:title / og:description from the watch page HTML (UA-spoofed)."""
+    try:
+        import httpx
+        import re as _re
+        import html as _html
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = httpx.get(
+            f"https://www.youtube.com/watch?v={video_id}",
+            headers=headers, timeout=20, follow_redirects=True,
+        )
+        resp.raise_for_status()
+        html_text = resp.text
+
+        def _meta(prop: str) -> str:
+            m = _re.search(rf'<meta\s+property="{prop}"\s+content="([^"]*)"', html_text)
+            return _html.unescape(m.group(1)).strip() if m else ""
+
+        title = _meta("og:title")
+        description = _meta("og:description")
+        if not title and not description:
+            return None
+        return {"title": title, "description": description, "chapters": []}
+    except Exception:
+        return None
+
+
+def _extract_chapters_from_description(description: str) -> list[dict]:
+    """Pull 'MM:SS Label' style chapter markers out of a video description, if present."""
+    import re as _re
+    chapters = []
+    for line in description.splitlines():
+        m = _re.match(r"\s*(\d{1,2}(?::\d{2}){1,2})\s*[-–—:]?\s*(.+)", line)
+        if m:
+            try:
+                t = _vtt_time(m.group(1))
+            except Exception:
+                continue
+            label = m.group(2).strip()
+            if label:
+                chapters.append({"time": t, "label": label})
+    return chapters[:30]
+
+
+def _build_synthetic_segments(meta: dict) -> list[dict]:
+    """
+    Build a single pseudo-transcript segment from title/description/chapters so the
+    existing notes-generation pipeline can produce a best-effort summary from
+    metadata alone when no transcript/captions are reachable.
+    """
+    parts = []
+    if meta.get("title"):
+        parts.append(f"Video title: {meta['title']}")
+    if meta.get("description"):
+        parts.append(f"Video description:\n{meta['description'][:4000]}")
+    chapters = meta.get("chapters") or []
+    if chapters:
+        from ..utils.time_parser import format_time as _fmt
+        chapter_lines = "\n".join(f"- {_fmt(c['time'])} {c['label']}" for c in chapters)
+        parts.append(f"Chapters:\n{chapter_lines}")
+
+    text = (
+        "[NOTE: Full transcript/captions were unavailable for this video — YouTube blocked "
+        "access from our server. The following is metadata only: title, description, and "
+        "chapter list. Base the summary on this information and be transparent that the "
+        "full spoken content was not analyzed.]\n\n" + "\n\n".join(parts)
+    )
+    return [{"start": 0.0, "end": 0.0, "text": text}]
+
+
 def get_filename_from_url(url: str) -> str:
     """Extract a clean display filename from a URL."""
     import re

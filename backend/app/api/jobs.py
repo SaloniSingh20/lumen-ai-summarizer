@@ -181,23 +181,31 @@ def _submit_youtube_transcript_only(
 ) -> UploadResponse:
     """
     Fallback for YouTube URLs when yt-dlp download fails.
-    Fetches captions via youtube-transcript-api and queues a lightweight
-    transcript-only notes-generation task (no video file needed).
+
+    Runs a best-effort fallback chain (see fetch_youtube_content):
+      1. captions/transcript, 2. YouTube Data API v3 metadata, 3. page scraping.
+    Whatever is found — even just a title/description — is used to queue a
+    lightweight notes-generation task. Only raises if literally nothing could
+    be retrieved.
     """
-    from ..pipeline.ingest import fetch_youtube_transcript
+    from ..pipeline.ingest import fetch_youtube_content
     from worker.tasks import process_transcript_only_task
     from ..models import TranscriptSegment as TSModel
 
-    segments, language = fetch_youtube_transcript(url)  # raises RuntimeError if unavailable
+    result = fetch_youtube_content(url)  # raises RuntimeError only if nothing at all is retrievable
+    segments = result["segments"]
+    language = result["language"]
+    partial = result["partial"]
 
     filename = get_filename_from_url(url)
-    duration = max((s["end"] for s in segments), default=None)
+    duration = None if partial else max((s["end"] for s in segments), default=None)
+    stage = "Limited data found — generating best-effort summary" if partial else "Transcript fetched — generating notes"
 
     job = Job(
         id=str(uuid.uuid4()),
         owner_id=owner_id,
         status="processing",
-        stage="Transcript fetched — generating notes",
+        stage=stage,
         progress=20.0,
     )
     db.add(job)
@@ -228,8 +236,8 @@ def _submit_youtube_transcript_only(
     db.commit()
 
     try:
-        process_transcript_only_task.delay(job.id, video_id)
+        process_transcript_only_task.delay(job.id, video_id, partial)
     except Exception as _dispatch_err:
         logger.warning("Transcript task dispatch failed: %s", _dispatch_err)
 
-    return UploadResponse(job_id=job.id, video_id=video_id, message="Transcript fetched — generating notes")
+    return UploadResponse(job_id=job.id, video_id=video_id, message=stage)

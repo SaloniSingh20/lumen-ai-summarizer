@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
 
+    # YouTube Data API v3 — optional metadata fallback when captions are
+    # unavailable (title/description/chapters). Get a key from:
+    # https://console.cloud.google.com/apis/credentials (enable "YouTube Data API v3")
+    YOUTUBE_API_KEY: str = ""
+
     # OpenAI Whisper API (optional, api mode)
     OPENAI_API_KEY: str = ""
     USE_OPENAI_WHISPER: bool = False
