@@ -1,4 +1,4 @@
-# Lumen — AI Video Summarizer
+# Lumen- AI Video Summarizer
 
 An AI-powered video summarization platform that turns any video into structured notes, a searchable transcript, scene-by-scene visual breakdowns, and an interactive Q&A assistant — all in under two minutes.
 
